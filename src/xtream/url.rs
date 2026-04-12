@@ -32,3 +32,15 @@ pub fn build_movie_stream_url(
     let base = base_url.trim_end_matches('/');
     format!("{base}/movie/{username}/{password}/{stream_id}.{extension}")
 }
+
+/// `{base}/series/{username}/{password}/{stream_id}.{extension}`
+pub fn build_series_stream_url(
+    base_url: &str,
+    username: &str,
+    password: &str,
+    stream_id: i64,
+    extension: &str,
+) -> String {
+    let base = base_url.trim_end_matches('/');
+    format!("{base}/series/{username}/{password}/{stream_id}.{extension}")
+}

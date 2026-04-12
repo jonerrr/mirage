@@ -6,9 +6,11 @@ mod head_metadata;
 mod html;
 mod limits;
 mod naming;
+mod pace;
 mod path_seg;
 mod range_expand;
 mod state;
+mod tv_catalog;
 mod xtream;
 
 use std::net::SocketAddr;
@@ -25,7 +27,9 @@ use tracing_subscriber::util::SubscriberInitExt;
 use crate::cache::AppCache;
 use crate::config::Config;
 use crate::head_metadata::HeadMetadataCache;
+use crate::pace::UpstreamPacer;
 use crate::state::AppState;
+use crate::tv_catalog::{TvCatalogHandle, tv_catalog_worker_loop};
 use crate::xtream::XtreamClient;
 
 fn init_tracing() {
@@ -51,8 +55,14 @@ async fn main() -> anyhow::Result<()> {
         .user_agent("mirage/0.1")
         .build()?;
 
+    let pacer = UpstreamPacer::new(
+        config.upstream_pace.min_interval,
+        config.upstream_pace.max_inflight,
+    );
+
     let xtream = XtreamClient::new(
         http.clone(),
+        pacer,
         config.xtream_base_url.clone(),
         config.xtream_username.clone(),
         config.xtream_password.clone(),
@@ -62,16 +72,52 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!(
             max_categories = config.limits.max_categories,
             max_vod_per_category = config.limits.max_vod_per_category,
+            max_series_per_category = config.limits.max_series_per_category,
+            max_episodes_per_series = config.limits.max_episodes_per_series,
             "MIRAGE_TEST_MODE is on: truncated catalog after each API response (payload is still downloaded once per request)"
         );
     }
 
+    let tv_catalog = TvCatalogHandle::new();
+    if let Ok(loaded) = crate::tv_catalog::load_catalog_from_path(&config.tv_catalog.catalog_path) {
+        if crate::tv_catalog::catalog_format_ok(&loaded) {
+            tv_catalog.set(Some(loaded)).await;
+            tracing::info!(
+                path = %config.tv_catalog.catalog_path.display(),
+                "loaded TV catalog snapshot from disk"
+            );
+        } else {
+            tracing::warn!(
+                path = %config.tv_catalog.catalog_path.display(),
+                "TV catalog file has wrong format_version; ignoring"
+            );
+        }
+    }
+
+    let cache = AppCache::new();
+    let head_cache = HeadMetadataCache::new();
+
+    let worker_state = AppState {
+        xtream: xtream.clone(),
+        http: http.clone(),
+        cache: cache.clone(),
+        limits: config.limits,
+        head_cache: head_cache.clone(),
+        tv_catalog: tv_catalog.clone(),
+    };
+    let catalog_path = config.tv_catalog.catalog_path.clone();
+    let refresh = config.tv_catalog.refresh;
+    tokio::spawn(async move {
+        tv_catalog_worker_loop(worker_state, catalog_path, refresh).await;
+    });
+
     let state = AppState {
         xtream,
         http,
-        cache: AppCache::new(),
+        cache,
         limits: config.limits,
-        head_cache: HeadMetadataCache::new(),
+        head_cache,
+        tv_catalog,
     };
 
     let app = Router::new()
@@ -90,7 +136,17 @@ async fn main() -> anyhow::Result<()> {
             "/movies/{category_id}/{movie_dir}/{file}",
             get(handlers::proxy_video).head(handlers::proxy_video),
         )
-        .route("/tv/", get(handlers::tv_stub))
+        .route("/tv", get(handlers::redirect_tv))
+        .route("/tv/", get(handlers::list_all_tv_series))
+        .route("/tv/{show_dir}/", get(handlers::list_seasons))
+        .route(
+            "/tv/{show_dir}/{season_dir}/",
+            get(handlers::list_episodes_in_season),
+        )
+        .route(
+            "/tv/{show_dir}/{season_dir}/{file}",
+            get(handlers::proxy_episode).head(handlers::proxy_episode),
+        )
         .with_state(state)
         .layer(TraceLayer::new_for_http());
 

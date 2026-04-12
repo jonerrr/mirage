@@ -6,6 +6,8 @@ pub struct MirageLimits {
     pub test_mode: bool,
     pub max_categories: usize,
     pub max_vod_per_category: usize,
+    pub max_series_per_category: usize,
+    pub max_episodes_per_series: usize,
 }
 
 impl MirageLimits {
@@ -13,10 +15,14 @@ impl MirageLimits {
         let test_mode = env_truthy("MIRAGE_TEST_MODE");
         let max_categories = env_usize_positive("MIRAGE_TEST_MAX_CATEGORIES", 1);
         let max_vod_per_category = env_usize_positive("MIRAGE_TEST_MAX_VOD", 10);
+        let max_series_per_category = env_usize_positive("MIRAGE_TEST_MAX_SERIES", 10);
+        let max_episodes_per_series = env_usize_positive("MIRAGE_TEST_MAX_EPISODES", 10);
         Self {
             test_mode,
             max_categories,
             max_vod_per_category,
+            max_series_per_category,
+            max_episodes_per_series,
         }
     }
 }

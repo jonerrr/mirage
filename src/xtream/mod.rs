@@ -5,4 +5,6 @@ mod url;
 
 pub use client::XtreamClient;
 pub use error::XtreamError;
-pub use types::{VodCategory, VodStream};
+pub use types::{
+    SeriesDetail, SeriesEpisode, SeriesInfoMeta, SeriesListing, VodCategory, VodStream,
+};

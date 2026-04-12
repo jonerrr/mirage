@@ -1,6 +1,8 @@
 use serde_json::Value;
 
-use crate::xtream::VodStream;
+use std::collections::BTreeSet;
+
+use crate::xtream::{SeriesDetail, SeriesEpisode, SeriesInfoMeta, SeriesListing, VodStream};
 
 /// Primary display title for a stream.
 pub fn display_title(listing: &VodStream) -> String {
@@ -91,6 +93,15 @@ fn strip_trailing_paren_year(s: &str) -> String {
     s.to_string()
 }
 
+/// First non-empty release date from Xtream (`release_date` / `releaseDate` / `releasedate` are separate JSON keys).
+fn vod_release_date(listing: &VodStream) -> Option<&str> {
+    listing
+        .release_date
+        .as_deref()
+        .or(listing.release_date_alt.as_deref())
+        .or(listing.release_date_lower.as_deref())
+}
+
 /// Year string for naming; falls back to release date, title/name `(YYYY)`, then `"Unknown"`.
 pub fn display_year(listing: &VodStream) -> String {
     if let Some(ref v) = listing.year {
@@ -98,9 +109,7 @@ pub fn display_year(listing: &VodStream) -> String {
             return y;
         }
     }
-    if let Some(rd) = listing
-        .release_date
-        .as_deref()
+    if let Some(rd) = vod_release_date(listing)
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
@@ -202,6 +211,189 @@ pub fn video_filename(listing: &VodStream) -> String {
     format!("{}.{}", movie_base_name(listing), video_extension(listing))
 }
 
+/// Year for a series from `name` / optional release date fields.
+pub fn display_year_series(name: &str, release_date: Option<&str>) -> String {
+    if let Some(rd) = release_date.map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(y) = year_from_json_value(&Value::String(rd.to_string())) {
+            return y;
+        }
+    }
+    last_paren_year(name).unwrap_or_else(|| "Unknown".to_string())
+}
+
+/// Series show folder name from a `get_series` row (must match [`show_base_name_info`] for the same show).
+pub fn show_base_name_listing(listing: &SeriesListing) -> String {
+    let raw_title = listing.name.trim();
+    let year = display_year_series(
+        raw_title,
+        listing
+            .release_date
+            .as_deref()
+            .or(listing.release_date_alt.as_deref()),
+    );
+    let title_core = strip_trailing_paren_year(raw_title);
+    let title = sanitize_title(&title_core);
+    let mut base = format!("{title} ({year})");
+    if let Some(t) = listing.tmdb.as_ref().and_then(tmdb_from_value) {
+        base.push_str(&format!(" {{tmdb-{t}}} [tmdbid-{t}]"));
+    }
+    base.push_str(&format!(" {{seriesid-{}}}", listing.series_id));
+    base
+}
+
+/// Series show folder name from `get_series_info.info` (paired with `series_id` from the URL).
+#[allow(dead_code)] // Used in tests; mirrors `show_base_name_listing` when metadata matches.
+pub fn show_base_name_info(info: &SeriesInfoMeta, series_id: i64) -> String {
+    let raw_title = info.name.as_deref().unwrap_or("Untitled").trim();
+    let year = display_year_series(
+        raw_title,
+        info.release_date
+            .as_deref()
+            .or(info.release_date_alt.as_deref()),
+    );
+    let title_core = strip_trailing_paren_year(raw_title);
+    let title = sanitize_title(&title_core);
+    let mut base = format!("{title} ({year})");
+    if let Some(t) = info.tmdb.as_ref().and_then(tmdb_from_value) {
+        base.push_str(&format!(" {{tmdb-{t}}} [tmdbid-{t}]"));
+    }
+    base.push_str(&format!(" {{seriesid-{series_id}}}"));
+    base
+}
+
+/// Extract `{seriesid-123}` from a show folder basename.
+pub fn parse_seriesid(name: &str) -> Option<i64> {
+    const KEY: &str = "{seriesid-";
+    let start = name.find(KEY)? + KEY.len();
+    let rest = &name[start..];
+    let end = rest.find('}')?;
+    rest[..end].parse().ok()
+}
+
+/// Look up an episode by Xtream stream id.
+pub fn find_episode_by_stream_id<'a>(
+    detail: &'a SeriesDetail,
+    stream_id: i64,
+) -> Option<&'a SeriesEpisode> {
+    for eps in detail.episodes.values() {
+        for ep in eps {
+            if episode_stream_id(ep) == Some(stream_id) {
+                return Some(ep);
+            }
+        }
+    }
+    None
+}
+
+/// Episodes for a given season, sorted by episode number.
+pub fn episodes_in_season<'a>(detail: &'a SeriesDetail, season: i32) -> Vec<&'a SeriesEpisode> {
+    let mut out: Vec<&SeriesEpisode> = detail
+        .episodes
+        .values()
+        .flatten()
+        .filter(|ep| episode_season_number(ep) == season)
+        .collect();
+    out.sort_by_key(|a| episode_number(a));
+    out
+}
+
+/// Distinct season numbers for a series detail (map keys ∪ episode `season` fields).
+pub fn season_numbers_for_series(detail: &SeriesDetail) -> Vec<i32> {
+    let mut s = BTreeSet::new();
+    for k in detail.episodes.keys() {
+        if let Ok(n) = k.parse::<i32>() {
+            s.insert(n);
+        }
+    }
+    for eps in detail.episodes.values() {
+        for ep in eps {
+            s.insert(episode_season_number(ep));
+        }
+    }
+    s.into_iter().collect()
+}
+
+/// Plex/Jellyfin-style season directory: `Season 01`.
+pub fn season_dir_name(season: i32) -> String {
+    format!("Season {:02}", season)
+}
+
+/// Parse `Season 01` → `1`.
+pub fn parse_season_dir(dir: &str) -> Option<i32> {
+    let s = dir.trim();
+    const PREFIX: &str = "Season ";
+    if !s.starts_with(PREFIX) {
+        return None;
+    }
+    s[PREFIX.len()..].trim().parse().ok()
+}
+
+/// Xtream episode stream id for `/series/.../{id}.ext`.
+pub fn episode_stream_id(ep: &SeriesEpisode) -> Option<i64> {
+    ep.id.as_ref().and_then(|v| match v {
+        Value::Number(n) => n.as_i64(),
+        Value::String(s) => s.parse().ok(),
+        _ => None,
+    })
+}
+
+/// Episode index within a season (for sorting).
+pub fn episode_number(ep: &SeriesEpisode) -> i32 {
+    ep.episode_num
+        .as_ref()
+        .and_then(|v| match v {
+            Value::Number(n) => n.as_i64().map(|x| x as i32),
+            Value::String(s) => s.parse().ok(),
+            _ => None,
+        })
+        .unwrap_or(0)
+}
+
+/// Season number from episode metadata (defaults to `1`).
+pub fn episode_season_number(ep: &SeriesEpisode) -> i32 {
+    ep.season
+        .as_ref()
+        .and_then(|v| match v {
+            Value::Number(n) => n.as_i64().map(|x| x as i32),
+            Value::String(s) => s.parse().ok(),
+            _ => None,
+        })
+        .unwrap_or(1)
+}
+
+pub fn episode_extension(ep: &SeriesEpisode) -> String {
+    ep.container_extension
+        .as_deref()
+        .map(|s| s.trim().trim_start_matches('.'))
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_else(|| "mp4".to_string())
+}
+
+/// Episode filename: sanitized API title + `{epid-<stream_id>}.ext`.
+pub fn episode_filename(ep: &SeriesEpisode) -> Option<String> {
+    let id = episode_stream_id(ep)?;
+    let raw = ep
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Episode");
+    let stem = raw.split(" {epid-").next().unwrap_or(raw);
+    let stem = sanitize_title(stem);
+    let ext = episode_extension(ep);
+    Some(format!("{stem} {{epid-{id}}}.{ext}"))
+}
+
+/// Extract `{epid-123}` from a basename or filename stem.
+pub fn parse_epid(name: &str) -> Option<i64> {
+    const KEY: &str = "{epid-";
+    let start = name.find(KEY)? + KEY.len();
+    let rest = &name[start..];
+    let end = rest.find('}')?;
+    rest[..end].parse().ok()
+}
+
 /// Extract `{vodid-123}` from a basename or filename stem.
 pub fn parse_vodid(name: &str) -> Option<i64> {
     const KEY: &str = "{vodid-";
@@ -241,6 +433,8 @@ mod tests {
             title: None,
             year: Some(serde_json::json!(2021)),
             release_date: None,
+            release_date_alt: None,
+            release_date_lower: None,
             category_id: None,
             container_extension: Some("mp4".into()),
             tmdb_id: Some(serde_json::json!(99)),
@@ -285,6 +479,44 @@ mod tests {
     }
 
     #[test]
+    fn series_tags_roundtrip() {
+        let listing = crate::xtream::SeriesListing {
+            name: "The Office (2005)".into(),
+            series_id: 42,
+            tmdb: Some(serde_json::json!("2316")),
+            release_date: None,
+            release_date_alt: None,
+        };
+        let base = show_base_name_listing(&listing);
+        assert!(base.contains("{seriesid-42}"));
+        assert_eq!(parse_seriesid(&base), Some(42));
+
+        let info = crate::xtream::SeriesInfoMeta {
+            name: Some("The Office (2005)".into()),
+            tmdb: Some(serde_json::json!("2316")),
+            category_id: None,
+            category_ids: vec![],
+            release_date: None,
+            release_date_alt: None,
+        };
+        assert_eq!(
+            show_base_name_listing(&listing),
+            show_base_name_info(&info, 42)
+        );
+
+        let ep = crate::xtream::SeriesEpisode {
+            id: Some(serde_json::json!("1380404")),
+            episode_num: Some(serde_json::json!(1)),
+            title: Some("The Office (2005) - S01E01 - Pilot".into()),
+            container_extension: Some("mkv".into()),
+            season: Some(serde_json::json!(1)),
+        };
+        let file = episode_filename(&ep).expect("filename");
+        let stem = file.strip_suffix(".mkv").expect("stem");
+        assert_eq!(parse_epid(stem), Some(1380404));
+    }
+
+    #[test]
     fn strip_duplicate_year_in_title() {
         let listing = VodStream {
             stream_id: 1,
@@ -292,6 +524,8 @@ mod tests {
             title: None,
             year: Some(Value::String(String::new())),
             release_date: None,
+            release_date_alt: None,
+            release_date_lower: None,
             category_id: None,
             container_extension: Some("mp4".into()),
             tmdb_id: Some(serde_json::json!(73180)),
