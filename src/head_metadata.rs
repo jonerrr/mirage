@@ -1,3 +1,4 @@
+// TODO: instead of trying to compensate for bad upstream data, maybe we should just detect and tell user to enable no_head on rclone.
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -125,7 +126,7 @@ pub async fn resolve_stream_head_metadata(
         let headers = resp.headers().clone();
         let _ = resp.bytes().await;
         if status.is_success() {
-            return headers_from_reqwest(&headers, ext);
+            return headers_from_reqwest(&headers, ext, status);
         }
     }
 
@@ -139,12 +140,7 @@ pub async fn resolve_stream_head_metadata(
         let headers = resp.headers().clone();
         let _ = resp.bytes().await;
         if status == ReqwestStatus::PARTIAL_CONTENT || status.is_success() {
-            let mut meta = headers_from_reqwest(&headers, ext);
-            if meta.content_length.is_none() {
-                if let Some(cr) = header_first(&headers, "content-range") {
-                    meta.content_length = total_from_content_range(&cr);
-                }
-            }
+            let meta = headers_from_reqwest(&headers, ext, status);
             if meta.content_type.is_some() || meta.content_length.is_some() {
                 return meta;
             }
@@ -159,14 +155,35 @@ pub async fn resolve_stream_head_metadata(
     }
 }
 
-fn headers_from_reqwest(headers: &ReqwestHeaderMap, ext: &str) -> HeadHeaders {
+fn normalized_accept_ranges(raw: Option<String>) -> Option<String> {
+    let raw = raw?.trim().to_ascii_lowercase();
+    match raw.as_str() {
+        "bytes" => Some("bytes".to_string()),
+        "none" => Some("none".to_string()),
+        _ => None,
+    }
+}
+
+fn headers_from_reqwest(
+    headers: &ReqwestHeaderMap,
+    ext: &str,
+    status: ReqwestStatus,
+) -> HeadHeaders {
     let content_type =
         header_first(headers, "content-type").or_else(|| Some(guess_video_mime(ext).to_string()));
-    let content_length = header_first(headers, "content-length").and_then(|s| s.parse().ok());
+    let mut content_length = header_first(headers, "content-length").and_then(|s| s.parse().ok());
+    let total_from_cr =
+        header_first(headers, "content-range").and_then(|cr| total_from_content_range(&cr));
+    if status == ReqwestStatus::PARTIAL_CONTENT {
+        content_length = total_from_cr;
+    } else if content_length.is_none() {
+        content_length = total_from_cr;
+    }
+
     HeadHeaders {
         content_length,
         content_type,
-        accept_ranges: header_first(headers, "accept-ranges"),
+        accept_ranges: normalized_accept_ranges(header_first(headers, "accept-ranges")),
         last_modified: header_first(headers, "last-modified"),
     }
 }
@@ -210,13 +227,20 @@ pub fn merge_upstream_headers(out: &mut HeaderMap, hdr: &ReqwestHeaderMap) {
     copy_if_present!(CONTENT_TYPE);
     copy_if_present!(CONTENT_LENGTH);
     copy_if_present!(CONTENT_RANGE);
-    copy_if_present!(ACCEPT_RANGES);
+    if let Some(ar) = normalized_accept_ranges(header_first(hdr, "accept-ranges")) {
+        if let Ok(v) = HeaderValue::from_str(&ar) {
+            let _ = out.insert(ACCEPT_RANGES, v);
+        }
+    } else {
+        let _ = out.insert(ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    }
     copy_if_present!(LAST_MODIFIED);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reqwest::header::HeaderValue;
 
     #[test]
     fn content_range_total() {
@@ -225,5 +249,27 @@ mod tests {
             Some(12_345_678)
         );
         assert_eq!(total_from_content_range("bytes 0-999/*"), None);
+    }
+
+    #[test]
+    fn partial_uses_total_from_content_range() {
+        let mut headers = ReqwestHeaderMap::new();
+        headers.insert("content-length", HeaderValue::from_static("1"));
+        headers.insert(
+            "content-range",
+            HeaderValue::from_static("bytes 0-0/6783696380"),
+        );
+
+        let meta = headers_from_reqwest(&headers, "mkv", ReqwestStatus::PARTIAL_CONTENT);
+        assert_eq!(meta.content_length, Some(6_783_696_380));
+    }
+
+    #[test]
+    fn malformed_accept_ranges_is_dropped() {
+        let mut headers = ReqwestHeaderMap::new();
+        headers.insert("accept-ranges", HeaderValue::from_static("0-6783696380"));
+
+        let meta = headers_from_reqwest(&headers, "mkv", ReqwestStatus::OK);
+        assert_eq!(meta.accept_ranges, None);
     }
 }
