@@ -1,0 +1,8 @@
+target/
+data/
+.github/
+*.md
+mise.*.toml
+mise.toml
+compose.yml
+Dockerfile
