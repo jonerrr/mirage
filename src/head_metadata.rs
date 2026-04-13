@@ -151,12 +151,6 @@ fn parse_ranged_get_probe(
     })
 }
 
-fn probe_failure_message(detail: String) -> String {
-    format!(
-        "{detail} If rclone listing/stat fails with this error, you may try rclone's --http-no-head (client-side only; it does not fix a broken upstream)."
-    )
-}
-
 /// Probe upstream metadata with `GET` + `Range: bytes=0-0` (relaxed: success status,
 /// non-`none` Accept-Ranges, derivable total size, optional Content-Type).
 pub async fn resolve_stream_head_metadata(
@@ -168,13 +162,14 @@ pub async fn resolve_stream_head_metadata(
         .header(reqwest::header::RANGE, "bytes=0-0")
         .send()
         .await
-        .map_err(|e| probe_failure_message(format!("upstream ranged GET probe failed: {e}")))?;
+        .map_err(|e| format!("upstream ranged GET probe failed: {e}"))?;
 
     let status = resp.status();
     let headers = resp.headers().clone();
     let _ = resp.bytes().await;
 
-    parse_ranged_get_probe(&headers, status).map_err(probe_failure_message)
+    parse_ranged_get_probe(&headers, status)
+        .map_err(|e| format!("upstream ranged GET probe failed: {e}"))
 }
 
 pub fn head_response_from_meta(meta: &HeadHeaders) -> Response<Body> {
