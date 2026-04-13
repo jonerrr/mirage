@@ -328,6 +328,8 @@ async fn proxy_upstream_stream(
             Ok(head_response_from_meta(&meta))
         }
         Method::GET => Ok(Redirect::temporary(upstream_url.as_str()).into_response()),
-        _ => Err(AppError::bad_request("only GET and HEAD are supported for this resource")),
+        _ => Err(AppError::bad_request(
+            "only GET and HEAD are supported for this resource",
+        )),
     }
 }

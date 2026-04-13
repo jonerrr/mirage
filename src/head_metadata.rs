@@ -112,7 +112,7 @@ fn reject_accept_ranges_none(headers: &ReqwestHeaderMap) -> Result<(), String> {
     }
 }
 
-fn parse_relaxed_ranged_get_probe(
+fn parse_ranged_get_probe(
     headers: &ReqwestHeaderMap,
     status: ReqwestStatus,
 ) -> Result<HeadHeaders, String> {
@@ -174,7 +174,7 @@ pub async fn resolve_stream_head_metadata(
     let headers = resp.headers().clone();
     let _ = resp.bytes().await;
 
-    parse_relaxed_ranged_get_probe(&headers, status).map_err(probe_failure_message)
+    parse_ranged_get_probe(&headers, status).map_err(probe_failure_message)
 }
 
 pub fn head_response_from_meta(meta: &HeadHeaders) -> Response<Body> {
@@ -228,8 +228,7 @@ mod tests {
             HeaderValue::from_static("bytes 0-0/6783696380"),
         );
 
-        let meta =
-            parse_relaxed_ranged_get_probe(&headers, ReqwestStatus::PARTIAL_CONTENT).unwrap();
+        let meta = parse_ranged_get_probe(&headers, ReqwestStatus::PARTIAL_CONTENT).unwrap();
         assert_eq!(meta.content_length, Some(6_783_696_380));
         assert_eq!(meta.content_type.as_deref(), Some("video/x-matroska"));
         assert_eq!(meta.accept_ranges.as_deref(), Some("bytes"));
@@ -241,7 +240,7 @@ mod tests {
         headers.insert("accept-ranges", HeaderValue::from_static("bytes"));
         headers.insert("content-length", HeaderValue::from_static("999"));
 
-        let meta = parse_relaxed_ranged_get_probe(&headers, ReqwestStatus::OK).unwrap();
+        let meta = parse_ranged_get_probe(&headers, ReqwestStatus::OK).unwrap();
         assert_eq!(meta.content_length, Some(999));
         assert!(meta.content_type.is_none());
     }
@@ -257,8 +256,7 @@ mod tests {
             HeaderValue::from_static("bytes 0-0/6783696380"),
         );
 
-        let meta =
-            parse_relaxed_ranged_get_probe(&headers, ReqwestStatus::PARTIAL_CONTENT).unwrap();
+        let meta = parse_ranged_get_probe(&headers, ReqwestStatus::PARTIAL_CONTENT).unwrap();
         assert_eq!(meta.content_length, Some(6_783_696_380));
         assert_eq!(meta.accept_ranges.as_deref(), Some("bytes"));
     }
@@ -273,7 +271,7 @@ mod tests {
             HeaderValue::from_static("bytes 0-0/6783696380"),
         );
 
-        assert!(parse_relaxed_ranged_get_probe(&headers, ReqwestStatus::PARTIAL_CONTENT).is_err());
+        assert!(parse_ranged_get_probe(&headers, ReqwestStatus::PARTIAL_CONTENT).is_err());
     }
 
     #[test]
@@ -282,6 +280,6 @@ mod tests {
         headers.insert("accept-ranges", HeaderValue::from_static("bytes"));
         headers.insert("content-length", HeaderValue::from_static("1"));
 
-        assert!(parse_relaxed_ranged_get_probe(&headers, ReqwestStatus::PARTIAL_CONTENT).is_err());
+        assert!(parse_ranged_get_probe(&headers, ReqwestStatus::PARTIAL_CONTENT).is_err());
     }
 }
