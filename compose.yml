@@ -1,52 +1,51 @@
 # used to test mirage with plex and jellyfin, not intended for production use
 services:
-  # mirage:
-  #   build: .
-  #   container_name: mirage
-  #   # restart: unless-stopped
-  #   environment:
-  #     - XTREAM_BASE_URL=https://iptv.example.com/
-  #     - XTREAM_USERNAME=REPLACE
-  #     - XTREAM_PASSWORD=REPLACE
-  #     - LISTEN=0.0.0.0:8080
-  #     - MIRAGE_TV_CATALOG_PATH=/data/tv_catalog.rkyv
-  #   volumes:
-  #     - mirage-data:/data
-  #   ports:
-  #     - 8080:8080/tcp
-
-  plex:
-    image: lscr.io/linuxserver/plex:latest
-    container_name: plex
-    #   restart: unless-stopped
-    environment:
-      # - PUID=${PUID:-1000}
-      # - PGID=${PGID:-1000}
-      - PUID=0
-      - PGID=0
-      - TZ=${TZ:-Etc/UTC}
-      - VERSION=docker
-    volumes:
-      - plex-config:/config
-      - /mnt/mirage:/media:ro,z
-    ports:
-      - 32400:32400/tcp
-
-  jellyfin:
-    image: lscr.io/linuxserver/jellyfin:latest
-    container_name: jellyfin
+  mirage:
+    build: .
+    container_name: mirage
     # restart: unless-stopped
     environment:
-      # - PUID=${PUID:-1000}
-      # - PGID=${PGID:-1000}
-      - PUID=0
-      - PGID=0
-      - TZ=${TZ:-Etc/UTC}
+      - LISTEN=0.0.0.0:8080
+      - MIRAGE_TV_CATALOG_PATH=/data/tv_catalog.rkyv
+    env_file:
+      - .env.docker
     volumes:
-      - jellyfin-config:/config
-      - /mnt/mirage:/media:ro,z
+      - mirage-data:/data
     ports:
-      - 8096:8096/tcp
+      - 8080:8080/tcp
+
+# plex:
+#   image: lscr.io/linuxserver/plex:latest
+#   container_name: plex
+#   #   restart: unless-stopped
+#   environment:
+#     # - PUID=${PUID:-1000}
+#     # - PGID=${PGID:-1000}
+#     - PUID=0
+#     - PGID=0
+#     - TZ=${TZ:-Etc/UTC}
+#     - VERSION=docker
+#   volumes:
+#     - plex-config:/config
+#     - /mnt/mirage:/media:ro,z
+#   ports:
+#     - 32400:32400/tcp
+
+# jellyfin:
+#   image: lscr.io/linuxserver/jellyfin:latest
+#   container_name: jellyfin
+#   # restart: unless-stopped
+#   environment:
+#     # - PUID=${PUID:-1000}
+#     # - PGID=${PGID:-1000}
+#     - PUID=0
+#     - PGID=0
+#     - TZ=${TZ:-Etc/UTC}
+#   volumes:
+#     - jellyfin-config:/config
+#     - /mnt/mirage:/media:ro,z
+#   ports:
+#     - 8096:8096/tcp
 
 volumes:
   mirage-data:

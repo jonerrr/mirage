@@ -4,8 +4,8 @@ WORKDIR /app
 COPY . /app
 RUN cargo build --release
 
-FROM gcr.io/distroless/cc-debian12:latest
+FROM gcr.io/distroless/cc-debian12:nonroot
 
 COPY --from=build /app/target/release/mirage /
 
-ENTRYPOINT [ "./mirage" ]
+ENTRYPOINT [ "/mirage" ]
