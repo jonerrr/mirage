@@ -818,7 +818,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
- "futures-util",
  "html-escape",
  "percent-encoding",
  "reqwest",

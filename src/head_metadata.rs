@@ -3,9 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::body::Body;
-use axum::http::header::{
-    ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, LAST_MODIFIED,
-};
+use axum::http::header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_TYPE, LAST_MODIFIED};
 use axum::http::{HeaderMap, HeaderValue, Response};
 use axum::response::IntoResponse;
 use reqwest::StatusCode as ReqwestStatus;
@@ -34,12 +32,6 @@ pub struct HeadHeaders {
     content_type: Option<String>,
     accept_ranges: Option<String>,
     last_modified: Option<String>,
-}
-
-impl HeadHeaders {
-    pub fn content_length(&self) -> Option<u64> {
-        self.content_length
-    }
 }
 
 impl HeadMetadataCache {
@@ -120,53 +112,40 @@ fn reject_accept_ranges_none(headers: &ReqwestHeaderMap) -> Result<(), String> {
     }
 }
 
-fn parse_strict_head_ok(
+fn parse_relaxed_ranged_get_probe(
     headers: &ReqwestHeaderMap,
     status: ReqwestStatus,
 ) -> Result<HeadHeaders, String> {
     if !status.is_success() {
-        return Err(format!("HEAD status {status}"));
+        return Err(format!("ranged GET probe got non-success status {status}"));
     }
-    let content_type = header_first(headers, "content-type")
-        .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| "missing Content-Type on upstream HEAD response".to_string())?;
     reject_accept_ranges_none(headers)?;
-    let cl = header_first(headers, "content-length")
-        .and_then(|s| s.parse::<u64>().ok())
-        .filter(|&n| n > 0)
-        .ok_or_else(|| "missing or zero Content-Length on upstream HEAD response".to_string())?;
-    Ok(HeadHeaders {
-        content_length: Some(cl),
-        content_type: Some(content_type),
-        accept_ranges: Some("bytes".to_string()),
-        last_modified: header_first(headers, "last-modified"),
-    })
-}
 
-fn parse_strict_ranged_get_probe(
-    headers: &ReqwestHeaderMap,
-    status: ReqwestStatus,
-) -> Result<HeadHeaders, String> {
-    if status != ReqwestStatus::PARTIAL_CONTENT {
-        return Err(format!(
-            "ranged GET probe expected 206 Partial Content, got {status} (upstream must support byte ranges with Content-Range)"
-        ));
-    }
-    let content_type = header_first(headers, "content-type")
-        .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| "missing Content-Type on ranged GET probe".to_string())?;
-    reject_accept_ranges_none(headers)?;
-    let cr = header_first(headers, "content-range")
-        .ok_or_else(|| "missing Content-Range on 206 ranged GET probe".to_string())?;
-    let total = total_from_content_range(&cr).ok_or_else(|| {
-        "invalid Content-Range on ranged GET probe (could not parse total size)".to_string()
+    let total_from_cr = header_first(headers, "content-range")
+        .as_ref()
+        .and_then(|cr| total_from_content_range(cr))
+        .filter(|&t| t > 0);
+
+    let total = if let Some(t) = total_from_cr {
+        Some(t)
+    } else if status == ReqwestStatus::PARTIAL_CONTENT {
+        None
+    } else {
+        header_first(headers, "content-length")
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|&n| n > 0)
+    };
+
+    let total = total.ok_or_else(|| {
+        "could not determine file size from upstream ranged GET probe (need Content-Range with a total size, or a non-206 success with Content-Length)"
+            .to_string()
     })?;
-    if total == 0 {
-        return Err("invalid Content-Range total (zero) on ranged GET probe".to_string());
-    }
+
+    let content_type = header_first(headers, "content-type").filter(|s| !s.trim().is_empty());
+
     Ok(HeadHeaders {
         content_length: Some(total),
-        content_type: Some(content_type),
+        content_type,
         accept_ranges: Some("bytes".to_string()),
         last_modified: header_first(headers, "last-modified"),
     })
@@ -178,24 +157,12 @@ fn probe_failure_message(detail: String) -> String {
     )
 }
 
-/// Probe upstream metadata with `GET` + `Range: bytes=0-0` (strict: 206 + Content-Range + headers).
-/// If `probe_use_upstream_head`, tries upstream `HEAD` first when it returns a strictly valid response.
+/// Probe upstream metadata with `GET` + `Range: bytes=0-0` (relaxed: success status,
+/// non-`none` Accept-Ranges, derivable total size, optional Content-Type).
 pub async fn resolve_stream_head_metadata(
     http: &reqwest::Client,
     upstream_url: &str,
-    probe_use_upstream_head: bool,
 ) -> Result<HeadHeaders, String> {
-    if probe_use_upstream_head && let Ok(resp) = http.head(upstream_url).send().await {
-        let status = resp.status();
-        let headers = resp.headers().clone();
-        let _ = resp.bytes().await;
-        if status.is_success()
-            && let Ok(meta) = parse_strict_head_ok(&headers, status)
-        {
-            return Ok(meta);
-        }
-    }
-
     let resp = http
         .get(upstream_url)
         .header(reqwest::header::RANGE, "bytes=0-0")
@@ -207,7 +174,7 @@ pub async fn resolve_stream_head_metadata(
     let headers = resp.headers().clone();
     let _ = resp.bytes().await;
 
-    parse_strict_ranged_get_probe(&headers, status).map_err(probe_failure_message)
+    parse_relaxed_ranged_get_probe(&headers, status).map_err(probe_failure_message)
 }
 
 pub fn head_response_from_meta(meta: &HeadHeaders) -> Response<Body> {
@@ -237,28 +204,6 @@ pub fn head_response_from_meta(meta: &HeadHeaders) -> Response<Body> {
     (axum::http::StatusCode::OK, out).into_response()
 }
 
-/// Copy selected headers from a successful upstream GET into an Axum response (streaming GET).
-pub fn merge_upstream_headers(out: &mut HeaderMap, hdr: &ReqwestHeaderMap) {
-    macro_rules! copy_if_present {
-        ($name:expr) => {
-            if let Some(v) = hdr.get($name) {
-                let _ = out.insert($name, v.clone());
-            }
-        };
-    }
-    copy_if_present!(CONTENT_TYPE);
-    copy_if_present!(CONTENT_LENGTH);
-    copy_if_present!(CONTENT_RANGE);
-    if let Some(ar) = normalized_accept_ranges(header_first(hdr, "accept-ranges")) {
-        if let Ok(v) = HeaderValue::from_str(&ar) {
-            let _ = out.insert(ACCEPT_RANGES, v);
-        }
-    } else {
-        let _ = out.insert(ACCEPT_RANGES, HeaderValue::from_static("bytes"));
-    }
-    copy_if_present!(LAST_MODIFIED);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,7 +219,7 @@ mod tests {
     }
 
     #[test]
-    fn strict_ranged_probe_ok() {
+    fn relaxed_ranged_probe_206_with_content_range() {
         let mut headers = ReqwestHeaderMap::new();
         headers.insert("content-type", HeaderValue::from_static("video/x-matroska"));
         headers.insert("accept-ranges", HeaderValue::from_static("bytes"));
@@ -283,17 +228,22 @@ mod tests {
             HeaderValue::from_static("bytes 0-0/6783696380"),
         );
 
-        let meta = parse_strict_ranged_get_probe(&headers, ReqwestStatus::PARTIAL_CONTENT).unwrap();
+        let meta =
+            parse_relaxed_ranged_get_probe(&headers, ReqwestStatus::PARTIAL_CONTENT).unwrap();
         assert_eq!(meta.content_length, Some(6_783_696_380));
         assert_eq!(meta.content_type.as_deref(), Some("video/x-matroska"));
         assert_eq!(meta.accept_ranges.as_deref(), Some("bytes"));
     }
 
     #[test]
-    fn strict_ranged_probe_rejects_non_206() {
+    fn relaxed_ranged_probe_200_with_content_length() {
         let mut headers = ReqwestHeaderMap::new();
-        headers.insert("content-type", HeaderValue::from_static("video/x-matroska"));
-        assert!(parse_strict_ranged_get_probe(&headers, ReqwestStatus::OK).is_err());
+        headers.insert("accept-ranges", HeaderValue::from_static("bytes"));
+        headers.insert("content-length", HeaderValue::from_static("999"));
+
+        let meta = parse_relaxed_ranged_get_probe(&headers, ReqwestStatus::OK).unwrap();
+        assert_eq!(meta.content_length, Some(999));
+        assert!(meta.content_type.is_none());
     }
 
     /// IPTV/CDN quirk: `Accept-Ranges` is not RFC-compliant but `206` + `Content-Range` proves ranges.
@@ -307,13 +257,14 @@ mod tests {
             HeaderValue::from_static("bytes 0-0/6783696380"),
         );
 
-        let meta = parse_strict_ranged_get_probe(&headers, ReqwestStatus::PARTIAL_CONTENT).unwrap();
+        let meta =
+            parse_relaxed_ranged_get_probe(&headers, ReqwestStatus::PARTIAL_CONTENT).unwrap();
         assert_eq!(meta.content_length, Some(6_783_696_380));
         assert_eq!(meta.accept_ranges.as_deref(), Some("bytes"));
     }
 
     #[test]
-    fn strict_ranged_probe_rejects_accept_ranges_none() {
+    fn relaxed_ranged_probe_rejects_accept_ranges_none() {
         let mut headers = ReqwestHeaderMap::new();
         headers.insert("content-type", HeaderValue::from_static("video/x-matroska"));
         headers.insert("accept-ranges", HeaderValue::from_static("none"));
@@ -322,17 +273,15 @@ mod tests {
             HeaderValue::from_static("bytes 0-0/6783696380"),
         );
 
-        assert!(parse_strict_ranged_get_probe(&headers, ReqwestStatus::PARTIAL_CONTENT).is_err());
+        assert!(parse_relaxed_ranged_get_probe(&headers, ReqwestStatus::PARTIAL_CONTENT).is_err());
     }
 
     #[test]
-    fn strict_head_ok() {
+    fn relaxed_ranged_probe_206_without_content_range_fails() {
         let mut headers = ReqwestHeaderMap::new();
-        headers.insert("content-type", HeaderValue::from_static("video/mp4"));
         headers.insert("accept-ranges", HeaderValue::from_static("bytes"));
-        headers.insert("content-length", HeaderValue::from_static("999"));
+        headers.insert("content-length", HeaderValue::from_static("1"));
 
-        let meta = parse_strict_head_ok(&headers, ReqwestStatus::OK).unwrap();
-        assert_eq!(meta.content_length, Some(999));
+        assert!(parse_relaxed_ranged_get_probe(&headers, ReqwestStatus::PARTIAL_CONTENT).is_err());
     }
 }

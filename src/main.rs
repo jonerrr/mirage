@@ -7,7 +7,6 @@ mod html;
 mod naming;
 mod pace;
 mod path_seg;
-mod range_expand;
 mod state;
 mod tv_catalog;
 mod xtream;
