@@ -64,17 +64,13 @@ cargo run --release
 
    TV libraries follow common **Plex / Jellyfin** layout under `tv/`: `/tv/` lists all shows; each show is `Show Name (year) … {seriesid-…}/Season 01/…` with episode filenames containing `S##E##` and `{epid-…}` before the extension. Until the first catalog snapshot is ready, `/tv/` returns **503** so scanners do not see an empty list as “everything deleted.”
 
-## Mount with rclone (VFS caching)
+## Mount with rclone
 
-[`rclone mount`](https://rclone.org/commands/rclone_mount/) builds a FUSE (or Windows equivalent) filesystem on top of the remote. For **read-only HTTP + video**, you usually want **VFS read caching** so players can seek and rclone does not re-download the same ranges from the **provider** (after Mirage’s redirect) for every small read.
-
-Read about the flags in the rclone [VFS file caching docs](https://rclone.org/commands/rclone_mount/#vfs-file-caching)
+[`rclone mount`](https://rclone.org/commands/rclone_mount/) builds a FUSE (or Windows equivalent) filesystem on top of the remote.
 
 Example **Linux** mount (replace `mirage:` with your remote name, and `/mnt/mirage` with your mountpoint):
 
 ```bash
-mkdir -p /mnt/mirage
-
 rclone mount mirage: /mnt/mirage \
   --read-only \
   --dir-cache-time 24h \
