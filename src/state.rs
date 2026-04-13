@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use reqwest::Client;
+use tokio::sync::Semaphore;
 
 use crate::cache::AppCache;
+use crate::config::MirageLimits;
 use crate::head_metadata::HeadMetadataCache;
-use crate::limits::MirageLimits;
 use crate::tv_catalog::TvCatalogHandle;
 use crate::xtream::XtreamClient;
 
@@ -14,4 +17,6 @@ pub struct AppState {
     pub limits: MirageLimits,
     pub head_cache: HeadMetadataCache,
     pub tv_catalog: TvCatalogHandle,
+    pub stream_probe_use_upstream_head: bool,
+    pub stream_inflight: Arc<Semaphore>,
 }

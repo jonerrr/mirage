@@ -2,8 +2,6 @@ use std::env;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::limits::MirageLimits;
-
 #[derive(Debug, Clone)]
 pub struct TvCatalogConfig {
     pub catalog_path: PathBuf,
@@ -16,6 +14,39 @@ pub struct UpstreamPaceConfig {
     pub max_inflight: u32,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct StreamConfig {
+    pub probe_use_upstream_head: bool,
+    pub max_inflight: u32,
+}
+
+/// Caps applied after each Xtream API response (truncation only; the HTTP body is still fetched once).
+#[derive(Debug, Clone, Copy)]
+pub struct MirageLimits {
+    pub test_mode: bool,
+    pub max_categories: usize,
+    pub max_vod_per_category: usize,
+    pub max_series_per_category: usize,
+    pub max_episodes_per_series: usize,
+}
+
+impl MirageLimits {
+    pub fn from_env() -> Self {
+        let test_mode = env_truthy("MIRAGE_TEST_MODE");
+        let max_categories = env_positive("MIRAGE_TEST_MAX_CATEGORIES", 1);
+        let max_vod_per_category = env_positive("MIRAGE_TEST_MAX_VOD", 10);
+        let max_series_per_category = env_positive("MIRAGE_TEST_MAX_SERIES", 10);
+        let max_episodes_per_series = env_positive("MIRAGE_TEST_MAX_EPISODES", 10);
+        Self {
+            test_mode,
+            max_categories,
+            max_vod_per_category,
+            max_series_per_category,
+            max_episodes_per_series,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub xtream_base_url: String,
@@ -25,6 +56,7 @@ pub struct Config {
     pub limits: MirageLimits,
     pub tv_catalog: TvCatalogConfig,
     pub upstream_pace: UpstreamPaceConfig,
+    pub stream: StreamConfig,
 }
 
 impl Config {
@@ -62,6 +94,11 @@ impl Config {
             max_inflight,
         };
 
+        let stream = StreamConfig {
+            probe_use_upstream_head: env_truthy("MIRAGE_STREAM_PROBE_USE_UPSTREAM_HEAD"),
+            max_inflight: env_positive("MIRAGE_STREAM_MAX_INFLIGHT", 16),
+        };
+
         Ok(Self {
             xtream_base_url: base,
             xtream_username,
@@ -70,8 +107,16 @@ impl Config {
             limits,
             tv_catalog,
             upstream_pace,
+            stream,
         })
     }
+}
+
+fn env_truthy(key: &str) -> bool {
+    matches!(
+        env::var(key).map(|v| v.to_ascii_lowercase()).as_deref(),
+        Ok("1" | "true" | "yes" | "on")
+    )
 }
 
 fn env_positive<T>(key: &str, default: T) -> T

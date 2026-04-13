@@ -60,12 +60,12 @@ fn last_paren_year(text: &str) -> Option<String> {
             continue;
         }
         let inner = after[..4].trim();
-        if inner.len() == 4 && inner.chars().all(|c| c.is_ascii_digit()) {
-            if let Ok(y) = inner.parse::<u32>() {
-                if (1900..=2100).contains(&y) {
-                    best = Some(inner.to_string());
-                }
-            }
+        if inner.len() == 4
+            && inner.chars().all(|c| c.is_ascii_digit())
+            && let Ok(y) = inner.parse::<u32>()
+            && (1900..=2100).contains(&y)
+        {
+            best = Some(inner.to_string());
         }
     }
     best
@@ -82,12 +82,12 @@ fn strip_trailing_paren_year(s: &str) -> String {
     }
     if let Some(open) = s[..s.len() - 1].rfind('(') {
         let inner = s[open + 1..s.len() - 1].trim();
-        if inner.len() == 4 && inner.chars().all(|c| c.is_ascii_digit()) {
-            if let Ok(y) = inner.parse::<u32>() {
-                if (1900..=2100).contains(&y) {
-                    return s[..open].trim_end().to_string();
-                }
-            }
+        if inner.len() == 4
+            && inner.chars().all(|c| c.is_ascii_digit())
+            && let Ok(y) = inner.parse::<u32>()
+            && (1900..=2100).contains(&y)
+        {
+            return s[..open].trim_end().to_string();
         }
     }
     s.to_string()
@@ -104,26 +104,25 @@ fn vod_release_date(listing: &VodStream) -> Option<&str> {
 
 /// Year string for naming; falls back to release date, title/name `(YYYY)`, then `"Unknown"`.
 pub fn display_year(listing: &VodStream) -> String {
-    if let Some(ref v) = listing.year {
-        if let Some(y) = year_from_json_value(v) {
-            return y;
-        }
+    if let Some(ref v) = listing.year
+        && let Some(y) = year_from_json_value(v)
+    {
+        return y;
     }
     if let Some(rd) = vod_release_date(listing)
         .map(str::trim)
         .filter(|s| !s.is_empty())
+        && let Some(y) = year_from_json_value(&Value::String(rd.to_string()))
     {
-        if let Some(y) = year_from_json_value(&Value::String(rd.to_string())) {
-            return y;
-        }
+        return y;
     }
     if let Some(y) = last_paren_year(&listing.name) {
         return y;
     }
-    if let Some(ref t) = listing.title {
-        if let Some(y) = last_paren_year(t) {
-            return y;
-        }
+    if let Some(ref t) = listing.title
+        && let Some(y) = last_paren_year(t)
+    {
+        return y;
     }
     "Unknown".to_string()
 }
@@ -148,10 +147,10 @@ fn tmdb_from_value(v: &Value) -> Option<u64> {
         }
         Value::Object(map) => {
             for key in ["id", "tmdb_id", "tmdbId", "tmdb"] {
-                if let Some(inner) = map.get(key) {
-                    if let Some(t) = tmdb_from_value(inner) {
-                        return Some(t);
-                    }
+                if let Some(inner) = map.get(key)
+                    && let Some(t) = tmdb_from_value(inner)
+                {
+                    return Some(t);
                 }
             }
             None
@@ -213,10 +212,10 @@ pub fn video_filename(listing: &VodStream) -> String {
 
 /// Year for a series from `name` / optional release date fields.
 pub fn display_year_series(name: &str, release_date: Option<&str>) -> String {
-    if let Some(rd) = release_date.map(str::trim).filter(|s| !s.is_empty()) {
-        if let Some(y) = year_from_json_value(&Value::String(rd.to_string())) {
-            return y;
-        }
+    if let Some(rd) = release_date.map(str::trim).filter(|s| !s.is_empty())
+        && let Some(y) = year_from_json_value(&Value::String(rd.to_string()))
+    {
+        return y;
     }
     last_paren_year(name).unwrap_or_else(|| "Unknown".to_string())
 }
@@ -271,10 +270,7 @@ pub fn parse_seriesid(name: &str) -> Option<i64> {
 }
 
 /// Look up an episode by Xtream stream id.
-pub fn find_episode_by_stream_id<'a>(
-    detail: &'a SeriesDetail,
-    stream_id: i64,
-) -> Option<&'a SeriesEpisode> {
+pub fn find_episode_by_stream_id(detail: &SeriesDetail, stream_id: i64) -> Option<&SeriesEpisode> {
     for eps in detail.episodes.values() {
         for ep in eps {
             if episode_stream_id(ep) == Some(stream_id) {
@@ -286,7 +282,7 @@ pub fn find_episode_by_stream_id<'a>(
 }
 
 /// Episodes for a given season, sorted by episode number.
-pub fn episodes_in_season<'a>(detail: &'a SeriesDetail, season: i32) -> Vec<&'a SeriesEpisode> {
+pub fn episodes_in_season(detail: &SeriesDetail, season: i32) -> Vec<&SeriesEpisode> {
     let mut out: Vec<&SeriesEpisode> = detail
         .episodes
         .values()

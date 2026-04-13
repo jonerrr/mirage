@@ -248,14 +248,7 @@ pub async fn proxy_video(
         .get(RANGE)
         .and_then(|h| h.to_str().ok())
         .map(|s| s.to_string());
-    proxy_upstream_stream(
-        &state,
-        method,
-        range_str.as_deref(),
-        upstream_url,
-        ext_upstream.as_str(),
-    )
-    .await
+    proxy_upstream_stream(&state, method, range_str.as_deref(), upstream_url).await
 }
 
 pub async fn proxy_episode(
@@ -320,14 +313,7 @@ pub async fn proxy_episode(
         .and_then(|h| h.to_str().ok())
         .map(|s| s.to_string());
 
-    proxy_upstream_stream(
-        &state,
-        method,
-        range_str.as_deref(),
-        upstream_url,
-        ext_upstream.as_str(),
-    )
-    .await
+    proxy_upstream_stream(&state, method, range_str.as_deref(), upstream_url).await
 }
 
 async fn proxy_upstream_stream(
@@ -335,27 +321,26 @@ async fn proxy_upstream_stream(
     method: Method,
     range_header: Option<&str>,
     upstream_url: String,
-    ext_upstream: &str,
 ) -> Result<Response, AppError> {
     let mut headers = ReqwestHeaderMap::new();
-    if method == Method::GET {
-        if let Some(range_str) = range_header {
-            let known_len = state
-                .head_cache
-                .get(&upstream_url)
-                .await
-                .and_then(|h| h.content_length());
-            if let Some(upstream_range) = upstream_range_header_value(Some(range_str), known_len) {
-                if upstream_range != range_str {
-                    tracing::debug!(
-                        client_range = %range_str,
-                        upstream_range = %upstream_range,
-                        "expanded Range for upstream (ffprobe/FUSE tiny reads)"
-                    );
-                }
-                if let Ok(hv) = HeaderValue::from_str(&upstream_range) {
-                    headers.insert(reqwest::header::RANGE, hv);
-                }
+    if method == Method::GET
+        && let Some(range_str) = range_header
+    {
+        let known_len = state
+            .head_cache
+            .get(&upstream_url)
+            .await
+            .and_then(|h| h.content_length());
+        if let Some(upstream_range) = upstream_range_header_value(Some(range_str), known_len) {
+            if upstream_range != range_str {
+                tracing::debug!(
+                    client_range = %range_str,
+                    upstream_range = %upstream_range,
+                    "expanded Range for upstream (ffprobe/FUSE tiny reads)"
+                );
+            }
+            if let Ok(hv) = HeaderValue::from_str(&upstream_range) {
+                headers.insert(reqwest::header::RANGE, hv);
             }
         }
     }
@@ -364,7 +349,18 @@ async fn proxy_upstream_stream(
         if let Some(meta) = state.head_cache.get(&upstream_url).await {
             return Ok(head_response_from_meta(&meta));
         }
-        let meta = resolve_stream_head_metadata(&state.http, &upstream_url, ext_upstream).await;
+        let _permit = state
+            .stream_inflight
+            .acquire()
+            .await
+            .map_err(|_| AppError::internal("stream concurrency limiter closed"))?;
+        let meta = resolve_stream_head_metadata(
+            &state.http,
+            &upstream_url,
+            state.stream_probe_use_upstream_head,
+        )
+        .await
+        .map_err(AppError::bad_gateway)?;
         state
             .head_cache
             .insert(upstream_url.clone(), meta.clone())
@@ -372,6 +368,11 @@ async fn proxy_upstream_stream(
         return Ok(head_response_from_meta(&meta));
     }
 
+    let _permit = state
+        .stream_inflight
+        .acquire()
+        .await
+        .map_err(|_| AppError::internal("stream concurrency limiter closed"))?;
     let resp = state
         .http
         .get(&upstream_url)

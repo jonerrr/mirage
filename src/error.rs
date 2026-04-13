@@ -31,6 +31,13 @@ impl AppError {
             message: msg.into(),
         }
     }
+
+    pub fn bad_gateway(msg: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::BAD_GATEWAY,
+            message: msg.into(),
+        }
+    }
 }
 
 impl From<XtreamError> for AppError {

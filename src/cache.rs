@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::RwLock;
 
-use crate::limits::MirageLimits;
+use crate::config::MirageLimits;
 use crate::xtream::{SeriesDetail, VodCategory, VodStream, XtreamClient, XtreamError};
 
 const DEFAULT_TTL: Duration = Duration::from_secs(12 * 60 * 60);
@@ -51,10 +51,10 @@ impl AppCache {
         let now = Instant::now();
         {
             let g = self.inner.read().await;
-            if let Some(ref e) = g.vod_categories {
-                if now < e.expires_at {
-                    return Ok(e.value.clone());
-                }
+            if let Some(ref e) = g.vod_categories
+                && now < e.expires_at
+            {
+                return Ok(e.value.clone());
             }
         }
 
@@ -83,10 +83,10 @@ impl AppCache {
 
         {
             let g = self.inner.read().await;
-            if let Some(e) = g.vod_streams.get(&key) {
-                if now < e.expires_at {
-                    return Ok(e.value.clone());
-                }
+            if let Some(e) = g.vod_streams.get(&key)
+                && now < e.expires_at
+            {
+                return Ok(e.value.clone());
             }
         }
 
@@ -115,10 +115,10 @@ impl AppCache {
 
         {
             let g = self.inner.read().await;
-            if let Some(e) = g.series_info.get(&key) {
-                if now < e.expires_at {
-                    return Ok(e.value.clone());
-                }
+            if let Some(e) = g.series_info.get(&key)
+                && now < e.expires_at
+            {
+                return Ok(e.value.clone());
             }
         }
 

@@ -4,22 +4,24 @@ _Create the illusion of local files in the desert of your HTTP streams._
 
 Mirage is an HTTP front-end to an Xtream Codes VOD and series API. It serves HTML directory listings that [rclone’s `http` backend](https://rclone.org/http/) understands, and proxies video `GET`/`HEAD` (including `Range`) to your provider’s `/movie/...` (films) and `/series/...` (TV episodes) URLs so everything stays on one host from rclone’s point of view.
 
-Many IPTV hosts and CDNs return **520 / 405 / other errors for `HEAD`** on direct stream URLs, while **`GET`** still works. That breaks [rclone’s `http` backend](https://rclone.org/http/), which issues a `HEAD` per listed file to confirm type and size. Mirage instead **tries upstream `HEAD`**, then a tiny **`GET` with `Range: bytes=0-0`** to read `Content-Length` / `Content-Range` and `Content-Type`, and responds to your client with **`200 OK`** and sensible headers. Results are **cached per stream URL for 15 minutes** to avoid hammering the provider when the UI rescans. Full **`GET`** playback is still a normal proxied stream.
+When a client (e.g. rclone) sends **`HEAD` to Mirage** for a video file, Mirage probes the **provider** with a **`GET` and `Range: bytes=0-0`** (upstream **`HEAD` is off by default**; set `MIRAGE_STREAM_PROBE_USE_UPSTREAM_HEAD` if your provider supports it and you want to try it first). The probe must return **`206 Partial Content`** with **`Content-Range`** (including total size), **`Content-Type`**, and **`Accept-Ranges: bytes`**. If that fails, Mirage responds with **502** and an error message—there is no silent fallback. Probe results are **cached per stream URL for 15 minutes**. Full **`GET`** playback is a normal proxied stream; concurrent upstream video requests are limited by **`MIRAGE_STREAM_MAX_INFLIGHT`**.
 
 **Small `Range` reads (Jellyfin / ffprobe):** FUSE and tools often request **`bytes=0-0`** or a few KB at the start of a file. Upstreams may respond with **206** and literally **one byte**, which breaks **ffprobe** (MKV EBML / MP4 headers need more data). Mirage **widens** those requests to at least **256 KiB** from offset 0 when forwarding upstream (using cached `Content-Length` to cap at EOF when known). You may still see **`error writing a body to connection`** in logs when the client closes the socket after it has read enough- that is normal.
 
 ## Environment variables
 
-| Variable                          | Required | Description                                                                                                                                                     |
-| --------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `XTREAM_BASE_URL`                 | **Yes**  | Xtream server base URL (scheme + host, optional port). Trailing slashes are stripped; do **not** include `/player_api.php`. Example: `https://iptv.example.com` |
-| `XTREAM_USERNAME`                 | **Yes**  | Xtream username for `player_api.php` and stream URLs                                                                                                            |
-| `XTREAM_PASSWORD`                 | **Yes**  | Xtream password                                                                                                                                                 |
-| `LISTEN`                          | No       | Socket to bind (default `127.0.0.1:8080`). Use `0.0.0.0:8080` only if you intend to expose Mirage on the network                                                |
-| `MIRAGE_TV_CATALOG_PATH`          | No       | Filesystem path for the on-disk TV catalog snapshot (default `data/tv_catalog.rkyv`)                                                                            |
-| `MIRAGE_TV_REFRESH_SECS`          | No       | How often the background job rebuilds the TV catalog (default **43200** = 12 hours, minimum 1)                                                                  |
-| `MIRAGE_UPSTREAM_MIN_INTERVAL_MS` | No       | Minimum spacing between **Xtream API** JSON requests process-wide (default **300**, minimum 1)                                                                  |
-| `MIRAGE_UPSTREAM_MAX_INFLIGHT`    | No       | Max concurrent Xtream API JSON requests (default **1**, minimum 1)                                                                                              |
+| Variable                                | Required | Description                                                                                                                                                     |
+| --------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `XTREAM_BASE_URL`                       | **Yes**  | Xtream server base URL (scheme + host, optional port). Trailing slashes are stripped; do **not** include `/player_api.php`. Example: `https://iptv.example.com` |
+| `XTREAM_USERNAME`                       | **Yes**  | Xtream username for `player_api.php` and stream URLs                                                                                                            |
+| `XTREAM_PASSWORD`                       | **Yes**  | Xtream password                                                                                                                                                 |
+| `LISTEN`                                | No       | Socket to bind (default `127.0.0.1:8080`). Use `0.0.0.0:8080` only if you intend to expose Mirage on the network                                                |
+| `MIRAGE_TV_CATALOG_PATH`                | No       | Filesystem path for the on-disk TV catalog snapshot (default `data/tv_catalog.rkyv`)                                                                            |
+| `MIRAGE_TV_REFRESH_SECS`                | No       | How often the background job rebuilds the TV catalog (default **43200** = 12 hours, minimum 1)                                                                  |
+| `MIRAGE_UPSTREAM_MIN_INTERVAL_MS`       | No       | Minimum spacing between **Xtream API** JSON requests process-wide (default **300**, minimum 1)                                                                  |
+| `MIRAGE_UPSTREAM_MAX_INFLIGHT`          | No       | Max concurrent Xtream API JSON requests (default **1**, minimum 1)                                                                                              |
+| `MIRAGE_STREAM_MAX_INFLIGHT`            | No       | Max concurrent upstream **video** HTTP requests (`GET`/`HEAD` probe); additional requests **wait** for a slot (default **16**, minimum 1)                       |
+| `MIRAGE_STREAM_PROBE_USE_UPSTREAM_HEAD` | No       | When `1`/`true`/`yes`/`on`, try upstream **`HEAD`** before the ranged `GET` probe if the `HEAD` response is strictly valid (default **off**)                    |
 
 ### Test mode
 
@@ -69,14 +71,7 @@ cargo run --release
 
    TV libraries follow common **Plex / Jellyfin** layout under `tv/`: `/tv/` lists all shows; each show is `Show Name (year) … {seriesid-…}/Season 01/…` with episode filenames containing `S##E##` and `{epid-…}` before the extension. Until the first catalog snapshot is ready, `/tv/` returns **503** so scanners do not see an empty list as “everything deleted.”
 
-3. **If directory listings are slow** or the IPTV host does not implement `HEAD` reliably on movie URLs, enable **no head** for the remote (faster listings, but file sizes/modtimes may be unknown until a full read):
-
-   ```bash
-   rclone config
-   # edit remote → http_no_head / equivalent advanced option
-   ```
-
-   Or set `no_head = true` in the remote’s config section / use env `RCLONE_HTTP_NO_HEAD=true` when running rclone. See [`--http-no-head`](https://rclone.org/http/#advanced-options).
+3. **rclone `--http-no-head` (optional):** This flag applies to **rclone → Mirage**, not Mirage → your IPTV provider. You do **not** need it merely because the provider lacks `HEAD`—Mirage probes with **ranged `GET`** by default. Consider [`--http-no-head`](https://rclone.org/http/#advanced-options) if **directory listings are slow** (each rclone `HEAD` to Mirage can trigger an upstream probe on cache miss), or if Mirage returns **502** on `HEAD` and rclone’s stat/listing breaks—in that case `no_head` avoids relying on `HEAD` to Mirage (file sizes may stay unknown until a read; it does not fix a broken upstream).
 
 ## Mount with rclone (VFS caching)
 

@@ -4,7 +4,6 @@ mod error;
 mod handlers;
 mod head_metadata;
 mod html;
-mod limits;
 mod naming;
 mod pace;
 mod path_seg;
@@ -14,11 +13,13 @@ mod tv_catalog;
 mod xtream;
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use axum::Router;
 use axum::routing::get;
 use tokio::net::TcpListener;
 use tokio::signal;
+use tokio::sync::Semaphore;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -96,6 +97,7 @@ async fn main() -> anyhow::Result<()> {
 
     let cache = AppCache::new();
     let head_cache = HeadMetadataCache::new();
+    let stream_inflight = Arc::new(Semaphore::new(config.stream.max_inflight as usize));
 
     let worker_state = AppState {
         xtream: xtream.clone(),
@@ -104,6 +106,8 @@ async fn main() -> anyhow::Result<()> {
         limits: config.limits,
         head_cache: head_cache.clone(),
         tv_catalog: tv_catalog.clone(),
+        stream_probe_use_upstream_head: config.stream.probe_use_upstream_head,
+        stream_inflight: stream_inflight.clone(),
     };
     let catalog_path = config.tv_catalog.catalog_path.clone();
     let refresh = config.tv_catalog.refresh;
@@ -118,6 +122,8 @@ async fn main() -> anyhow::Result<()> {
         limits: config.limits,
         head_cache,
         tv_catalog,
+        stream_probe_use_upstream_head: config.stream.probe_use_upstream_head,
+        stream_inflight,
     };
 
     let app = Router::new()

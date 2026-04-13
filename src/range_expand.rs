@@ -37,19 +37,17 @@ pub fn expand_upstream_range_for_probe(
     if start != 0 {
         return None;
     }
-    let end = match end_opt {
-        None => return None, // bytes=0- means "rest of file"; do not expand
-        Some(e) => e,
-    };
+    // bytes=0- means "rest of file"; do not expand.
+    let end = end_opt?;
     let requested_len = end.saturating_sub(start).saturating_add(1);
     if requested_len >= MIN_PROBE_BYTES {
         return None;
     }
     let mut last_byte = start + MIN_PROBE_BYTES - 1;
-    if let Some(total) = known_content_length {
-        if total > 0 {
-            last_byte = last_byte.min(total - 1);
-        }
+    if let Some(total) = known_content_length
+        && total > 0
+    {
+        last_byte = last_byte.min(total - 1);
     }
     // After capping to file size, widening must still cover what the client asked for.
     if last_byte < end {
