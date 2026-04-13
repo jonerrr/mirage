@@ -4,6 +4,8 @@ use std::collections::BTreeSet;
 
 use crate::xtream::{SeriesDetail, SeriesEpisode, SeriesInfoMeta, SeriesListing, VodStream};
 
+// TODO: refactor this slop
+
 /// Primary display title for a stream.
 pub fn display_title(listing: &VodStream) -> String {
     let t = listing
@@ -240,6 +242,7 @@ pub fn show_base_name_listing(listing: &SeriesListing) -> String {
     base
 }
 
+// TODO: move this into tests module or remove
 /// Series show folder name from `get_series_info.info` (paired with `series_id` from the URL).
 #[allow(dead_code)] // Used in tests; mirrors `show_base_name_listing` when metadata matches.
 pub fn show_base_name_info(info: &SeriesInfoMeta, series_id: i64) -> String {

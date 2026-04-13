@@ -197,9 +197,6 @@ pub async fn proxy_video(
     req: Request<Body>,
 ) -> Result<Response, AppError> {
     let method = req.method().clone();
-    if method != Method::GET && method != Method::HEAD {
-        return Err(AppError::bad_request("only GET and HEAD supported"));
-    }
 
     let (stem, ext) = split_video_ext(&file)
         .ok_or_else(|| AppError::bad_request("file must end with a known video extension"))?;
@@ -246,9 +243,6 @@ pub async fn proxy_episode(
     req: Request<Body>,
 ) -> Result<Response, AppError> {
     let method = req.method().clone();
-    if method != Method::GET && method != Method::HEAD {
-        return Err(AppError::bad_request("only GET and HEAD supported"));
-    }
 
     let (stem, ext) = split_video_ext(&file)
         .ok_or_else(|| AppError::bad_request("file must end with a known video extension"))?;

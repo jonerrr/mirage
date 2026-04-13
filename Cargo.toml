@@ -7,6 +7,7 @@ edition = "2024"
 anyhow = "1.0.102"
 axum = { version = "0.8.8", features = ["macros"] }
 html-escape = "0.2.13"
+indicatif = "0.18.4"
 percent-encoding = "2.3.2"
 reqwest = { version = "0.13.2", features = ["json", "stream"] }
 rkyv = { version = "0.8.15", features = ["std", "bytecheck"] }

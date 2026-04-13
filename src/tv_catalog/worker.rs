@@ -2,6 +2,8 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use indicatif::{ProgressBar, ProgressStyle};
+
 use crate::naming::show_base_name_listing;
 use crate::state::AppState;
 use crate::xtream::XtreamError;
@@ -91,16 +93,27 @@ async fn build_tv_catalog_snapshot(state: &AppState) -> Result<TvCatalogSnapshot
         categories.truncate(limits.max_categories);
     }
 
+    let pb = ProgressBar::new(categories.len() as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} categories - {msg} ({eta})")
+            .unwrap()
+            .progress_chars("#>-")
+    );
+
     let mut seen = HashSet::new();
     let mut merged = Vec::new();
     for cat in categories {
+        pb.set_message(format!("Fetching category: {}", cat.category_name));
         let rows = client.get_series(&cat.category_id).await?;
         for s in rows {
             if seen.insert(s.series_id) {
                 merged.push(s);
             }
         }
+        pb.inc(1);
     }
+    pb.finish_with_message("TV catalog categories fetched");
 
     if limits.test_mode {
         merged.truncate(limits.max_series_per_category);
