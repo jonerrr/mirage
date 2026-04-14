@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
 use crate::config::MirageLimits;
-use crate::xtream::{SeriesDetail, VodCategory, VodStream, XtreamClient, XtreamError};
+use crate::xtream::{SeriesDetail, XtreamClient, XtreamError};
 
 const DEFAULT_TTL: Duration = Duration::from_secs(12 * 60 * 60);
 
@@ -22,8 +22,6 @@ pub struct AppCache {
 }
 
 struct Inner {
-    vod_categories: Option<CacheEntry<Vec<VodCategory>>>,
-    vod_streams: HashMap<String, CacheEntry<Vec<VodStream>>>,
     series_info: HashMap<String, CacheEntry<SeriesDetail>>,
 }
 
@@ -36,72 +34,9 @@ impl AppCache {
         Self {
             ttl,
             inner: Arc::new(RwLock::new(Inner {
-                vod_categories: None,
-                vod_streams: HashMap::new(),
                 series_info: HashMap::new(),
             })),
         }
-    }
-
-    pub async fn vod_categories(
-        &self,
-        client: &XtreamClient,
-        limits: MirageLimits,
-    ) -> Result<Arc<Vec<VodCategory>>, XtreamError> {
-        let now = Instant::now();
-        {
-            let g = self.inner.read().await;
-            if let Some(ref e) = g.vod_categories
-                && now < e.expires_at
-            {
-                return Ok(e.value.clone());
-            }
-        }
-
-        let mut data = client.get_vod_categories().await?;
-        if limits.test_mode {
-            data.truncate(limits.max_categories);
-        }
-        let entry = CacheEntry {
-            value: Arc::new(data),
-            expires_at: now + self.ttl,
-        };
-
-        let mut g = self.inner.write().await;
-        g.vod_categories = Some(entry.clone());
-        Ok(entry.value)
-    }
-
-    pub async fn vod_streams_for_category(
-        &self,
-        client: &XtreamClient,
-        category_id: &str,
-        limits: MirageLimits,
-    ) -> Result<Arc<Vec<VodStream>>, XtreamError> {
-        let now = Instant::now();
-        let key = category_id.to_string();
-
-        {
-            let g = self.inner.read().await;
-            if let Some(e) = g.vod_streams.get(&key)
-                && now < e.expires_at
-            {
-                return Ok(e.value.clone());
-            }
-        }
-
-        let mut data = client.get_vod_streams(category_id).await?;
-        if limits.test_mode {
-            data.truncate(limits.max_vod_per_category);
-        }
-        let entry = CacheEntry {
-            value: Arc::new(data),
-            expires_at: now + self.ttl,
-        };
-
-        let mut g = self.inner.write().await;
-        g.vod_streams.insert(key, entry.clone());
-        Ok(entry.value)
     }
 
     pub async fn series_detail(

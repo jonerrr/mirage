@@ -1,6 +1,5 @@
-use axum::body::Body;
 use axum::extract::{Path, State};
-use axum::http::{Method, Request, StatusCode};
+use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Redirect, Response};
 
 use crate::error::AppError;
@@ -8,9 +7,8 @@ use crate::head_metadata::{head_response_from_meta, resolve_stream_head_metadata
 use crate::html::directory_page;
 use crate::naming::{
     episode_extension, episode_filename, episode_season_number, episodes_in_season,
-    find_episode_by_stream_id, movie_base_name, parse_epid, parse_season_dir, parse_seriesid,
-    parse_vodid, season_dir_name, season_numbers_for_series, split_video_ext, video_extension,
-    video_filename,
+    find_episode_by_stream_id, parse_epid, parse_season_dir, parse_seriesid, season_dir_name,
+    season_numbers_for_series, split_video_ext,
 };
 use crate::path_seg::encode_path_segment;
 use crate::state::AppState;
@@ -43,68 +41,95 @@ pub async fn redirect_tv() -> Redirect {
     Redirect::permanent("/tv/")
 }
 
-pub async fn list_vod_categories(State(state): State<AppState>) -> Result<Html<String>, AppError> {
-    let cats = state
-        .cache
-        .vod_categories(&state.xtream, state.limits)
-        .await
-        .map_err(AppError::from)?;
+pub async fn list_vod_categories(State(state): State<AppState>) -> impl IntoResponse {
+    let Some(loaded) = state.movie_catalog.get().await else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Html(directory_page("Movies — catalog not ready yet", &[])),
+        )
+            .into_response();
+    };
 
+    let archived = loaded.archived();
     let mut entries = Vec::new();
-    for c in cats.iter() {
+    for c in archived.categories.iter() {
         let href = format!("{}/", encode_path_segment(&c.category_id));
         let label = if c.category_name.trim().is_empty() {
-            c.category_id.clone()
+            c.category_id.to_string()
         } else {
-            c.category_name.clone()
+            c.category_name.to_string()
         };
         entries.push((href, label));
     }
 
-    Ok(Html(directory_page("Movies — categories", &entries)))
+    Html(directory_page("Movies — categories", &entries)).into_response()
 }
 
 pub async fn list_movies_in_category(
     State(state): State<AppState>,
     Path(category_id): Path<String>,
-) -> Result<Html<String>, AppError> {
-    let streams = state
-        .cache
-        .vod_streams_for_category(&state.xtream, &category_id, state.limits)
-        .await
-        .map_err(AppError::from)?;
+) -> impl IntoResponse {
+    let Some(loaded) = state.movie_catalog.get().await else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Html(directory_page("Movies — catalog not ready yet", &[])),
+        )
+            .into_response();
+    };
+
+    let archived = loaded.archived();
+    let Some(cat) = archived
+        .categories
+        .iter()
+        .find(|c| c.category_id == category_id)
+    else {
+        return (
+            StatusCode::NOT_FOUND,
+            Html(directory_page("Movies — category not found", &[])),
+        )
+            .into_response();
+    };
 
     let mut entries = Vec::new();
-    for v in streams.iter() {
-        let base = movie_base_name(v);
-        let href = format!("{}/", encode_path_segment(&base));
-        entries.push((href, crate::naming::display_title(v)));
+    for v in cat.streams.iter() {
+        let href = format!("{}/", encode_path_segment(v.folder_name.as_str()));
+        entries.push((href, v.list_label.as_str().to_string()));
     }
 
-    let title = format!("Movies — category {category_id}");
-    Ok(Html(directory_page(&title, &entries)))
+    let title = format!("Movies — category {}", cat.category_name);
+    Html(directory_page(&title, &entries)).into_response()
 }
 
 pub async fn list_movie_folder(
     State(state): State<AppState>,
     Path((category_id, movie_dir)): Path<(String, String)>,
-) -> Result<Html<String>, AppError> {
-    let streams = state
-        .cache
-        .vod_streams_for_category(&state.xtream, &category_id, state.limits)
-        .await
-        .map_err(AppError::from)?;
+) -> impl IntoResponse {
+    let Some(loaded) = state.movie_catalog.get().await else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Html(directory_page("Movies — catalog not ready yet", &[])),
+        )
+            .into_response();
+    };
 
-    let listing = streams
+    let archived = loaded.archived();
+    let Some(cat) = archived
+        .categories
         .iter()
-        .find(|v| movie_base_name(v) == movie_dir)
-        .ok_or_else(|| AppError::not_found("unknown movie folder"))?;
+        .find(|c| c.category_id == category_id)
+    else {
+        return (StatusCode::NOT_FOUND, Html(String::new())).into_response();
+    };
 
-    let vf = video_filename(listing);
+    let Some(listing) = cat.streams.iter().find(|v| v.folder_name == movie_dir) else {
+        return (StatusCode::NOT_FOUND, Html(String::new())).into_response();
+    };
+
+    let vf = format!("{}.{}", listing.folder_name, listing.extension);
     let href = encode_path_segment(&vf);
     let entries = vec![(href, vf.clone())];
-    let title = format!("{movie_dir} /");
-    Ok(Html(directory_page(&title, &entries)))
+    let title = format!("{} /", listing.folder_name);
+    Html(directory_page(&title, &entries)).into_response()
 }
 
 pub async fn list_all_tv_series(State(state): State<AppState>) -> impl IntoResponse {
@@ -191,59 +216,47 @@ pub async fn list_episodes_in_season(
     Ok(Html(directory_page(&title, &entries)))
 }
 
-pub async fn proxy_video(
-    State(state): State<AppState>,
-    Path((category_id, movie_dir, file)): Path<(String, String, String)>,
-    req: Request<Body>,
-) -> Result<Response, AppError> {
-    let method = req.method().clone();
+async fn resolve_movie_url(
+    state: &AppState,
+    category_id: &str,
+    movie_dir: &str,
+    file: &str,
+) -> Result<String, AppError> {
+    let Some(loaded) = state.movie_catalog.get().await else {
+        return Err(AppError::internal("catalog not ready yet"));
+    };
 
-    let (stem, ext) = split_video_ext(&file)
-        .ok_or_else(|| AppError::bad_request("file must end with a known video extension"))?;
-
-    let stream_id = parse_vodid(stem)
-        .ok_or_else(|| AppError::bad_request("filename must contain {vodid-<id>}"))?;
-
-    let streams = state
-        .cache
-        .vod_streams_for_category(&state.xtream, &category_id, state.limits)
-        .await
-        .map_err(AppError::from)?;
-
-    let listing = streams
+    let archived = loaded.archived();
+    let Some(cat) = archived
+        .categories
         .iter()
-        .find(|v| v.stream_id == stream_id)
-        .ok_or_else(|| AppError::not_found("stream not in category"))?;
+        .find(|c| c.category_id == category_id)
+    else {
+        return Err(AppError::not_found("category not found"));
+    };
 
-    if movie_base_name(listing) != movie_dir {
-        return Err(AppError::not_found("movie folder does not match stream"));
-    }
+    let Some(listing) = cat.streams.iter().find(|v| v.folder_name == movie_dir) else {
+        return Err(AppError::not_found("movie folder not found"));
+    };
 
-    let expected = video_filename(listing);
+    let expected = format!("{}.{}", listing.folder_name, listing.extension);
     if file != expected {
         return Err(AppError::not_found(
             "filename does not match expected video name",
         ));
     }
 
-    let ext_upstream = video_extension(listing);
-    if ext != ext_upstream {
-        return Err(AppError::bad_request(
-            "extension does not match stream metadata",
-        ));
-    }
-
-    let upstream_url = state.xtream.movie_stream_url(stream_id, ext);
-    proxy_upstream_stream(&state, method, upstream_url).await
+    Ok(state
+        .xtream
+        .movie_stream_url(listing.stream_id.into(), listing.extension.as_str()))
 }
 
-pub async fn proxy_episode(
-    State(state): State<AppState>,
-    Path((show_dir, season_dir, file)): Path<(String, String, String)>,
-    req: Request<Body>,
-) -> Result<Response, AppError> {
-    let method = req.method().clone();
-
+async fn resolve_episode_url(
+    state: &AppState,
+    show_dir: &str,
+    season_dir: &str,
+    file: &str,
+) -> Result<String, AppError> {
     let (stem, ext) = split_video_ext(&file)
         .ok_or_else(|| AppError::bad_request("file must end with a known video extension"))?;
 
@@ -289,41 +302,64 @@ pub async fn proxy_episode(
         ));
     }
 
-    let upstream_url = state.xtream.series_stream_url(stream_id, ext);
-
-    proxy_upstream_stream(&state, method, upstream_url).await
+    Ok(state.xtream.series_stream_url(stream_id, ext))
 }
 
-async fn proxy_upstream_stream(
-    state: &AppState,
-    method: Method,
-    upstream_url: String,
+pub async fn proxy_video_get(
+    State(state): State<AppState>,
+    Path((category_id, movie_dir, file)): Path<(String, String, String)>,
+) -> Result<Redirect, AppError> {
+    let url = resolve_movie_url(&state, &category_id, &movie_dir, &file).await?;
+    Ok(Redirect::temporary(&url))
+}
+
+pub async fn proxy_video_head(
+    State(state): State<AppState>,
+    Path((category_id, movie_dir, file)): Path<(String, String, String)>,
 ) -> Result<Response, AppError> {
-    match method {
-        Method::HEAD if state.stream_probe_use_upstream_head => {
-            Ok(Redirect::temporary(upstream_url.as_str()).into_response())
-        }
-        Method::HEAD => {
-            if let Some(meta) = state.head_cache.get(&upstream_url).await {
-                return Ok(head_response_from_meta(&meta));
-            }
-            let _permit = state
-                .stream_inflight
-                .acquire()
-                .await
-                .map_err(|_| AppError::internal("stream concurrency limiter closed"))?;
-            let meta = resolve_stream_head_metadata(&state.http, &upstream_url)
-                .await
-                .map_err(AppError::bad_gateway)?;
-            state
-                .head_cache
-                .insert(upstream_url.clone(), meta.clone())
-                .await;
-            Ok(head_response_from_meta(&meta))
-        }
-        Method::GET => Ok(Redirect::temporary(upstream_url.as_str()).into_response()),
-        _ => Err(AppError::bad_request(
-            "only GET and HEAD are supported for this resource",
-        )),
+    let url = resolve_movie_url(&state, &category_id, &movie_dir, &file).await?;
+    handle_head_request(&state, url).await
+}
+
+pub async fn proxy_episode_get(
+    State(state): State<AppState>,
+    Path((show_dir, season_dir, file)): Path<(String, String, String)>,
+) -> Result<Redirect, AppError> {
+    let url = resolve_episode_url(&state, &show_dir, &season_dir, &file).await?;
+    Ok(Redirect::temporary(&url))
+}
+
+pub async fn proxy_episode_head(
+    State(state): State<AppState>,
+    Path((show_dir, season_dir, file)): Path<(String, String, String)>,
+) -> Result<Response, AppError> {
+    let url = resolve_episode_url(&state, &show_dir, &season_dir, &file).await?;
+    handle_head_request(&state, url).await
+}
+
+async fn handle_head_request(state: &AppState, upstream_url: String) -> Result<Response, AppError> {
+    if state.stream_probe_use_upstream_head {
+        return Ok(Redirect::temporary(upstream_url.as_str()).into_response());
     }
+
+    if let Some(meta) = state.head_cache.get(&upstream_url).await {
+        return Ok(head_response_from_meta(&meta));
+    }
+
+    let _permit = state
+        .stream_inflight
+        .acquire()
+        .await
+        .map_err(|_| AppError::internal("stream concurrency limiter closed"))?;
+
+    let meta = resolve_stream_head_metadata(&state.http, &upstream_url)
+        .await
+        .map_err(AppError::bad_gateway)?;
+
+    state
+        .head_cache
+        .insert(upstream_url.clone(), meta.clone())
+        .await;
+
+    Ok(head_response_from_meta(&meta))
 }

@@ -9,6 +9,12 @@ pub struct TvCatalogConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct MovieCatalogConfig {
+    pub catalog_path: PathBuf,
+    pub refresh: Duration,
+}
+
+#[derive(Debug, Clone)]
 pub struct UpstreamPaceConfig {
     pub min_interval: Duration,
     pub max_inflight: u32,
@@ -55,6 +61,7 @@ pub struct Config {
     pub listen: String,
     pub limits: MirageLimits,
     pub tv_catalog: TvCatalogConfig,
+    pub movie_catalog: MovieCatalogConfig,
     pub upstream_pace: UpstreamPaceConfig,
     pub stream: StreamConfig,
 }
@@ -87,6 +94,16 @@ impl Config {
             refresh: Duration::from_secs(refresh_secs),
         };
 
+        let movie_catalog_path = env::var("MIRAGE_MOVIE_CATALOG_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("data/movie_catalog.rkyv"));
+
+        let movie_refresh_secs = env_positive("MIRAGE_MOVIE_REFRESH_SECS", 12 * 60 * 60);
+        let movie_catalog = MovieCatalogConfig {
+            catalog_path: movie_catalog_path,
+            refresh: Duration::from_secs(movie_refresh_secs),
+        };
+
         let min_interval_ms = env_positive("MIRAGE_UPSTREAM_MIN_INTERVAL_MS", 300);
         let max_inflight = env_positive("MIRAGE_UPSTREAM_MAX_INFLIGHT", 1);
         let upstream_pace = UpstreamPaceConfig {
@@ -106,6 +123,7 @@ impl Config {
             listen,
             limits,
             tv_catalog,
+            movie_catalog,
             upstream_pace,
             stream,
         })

@@ -6,18 +6,20 @@ Mirage is an HTTP front-end to an Xtream Codes VOD and series API. It serves HTM
 
 ## Environment variables
 
-| Variable                                | Required | Default                | Description                                                                                                                                                                                                                     |
-| --------------------------------------- | -------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `XTREAM_BASE_URL`                       | **Yes**  | —                      | Xtream server base URL (scheme + host, optional port). Trailing slashes are stripped; do **not** include `/player_api.php`. Example: `https://iptv.example.com`                                                                 |
-| `XTREAM_USERNAME`                       | **Yes**  | —                      | Xtream username for `player_api.php` and stream URLs                                                                                                                                                                            |
-| `XTREAM_PASSWORD`                       | **Yes**  | —                      | Xtream password                                                                                                                                                                                                                 |
-| `LISTEN`                                | No       | `127.0.0.1:8080`       | Socket to bind. Use `0.0.0.0:8080` only if you intend to expose Mirage on the network                                                                                                                                           |
-| `MIRAGE_TV_CATALOG_PATH`                | No       | `data/tv_catalog.rkyv` | Filesystem path for the on-disk TV catalog snapshot                                                                                                                                                                             |
-| `MIRAGE_TV_REFRESH_SECS`                | No       | `43200`                | How often the background job rebuilds the TV catalog (12 hours, minimum 1)                                                                                                                                                      |
-| `MIRAGE_UPSTREAM_MIN_INTERVAL_MS`       | No       | `300`                  | Minimum spacing between **Xtream API** JSON requests process-wide (minimum 1)                                                                                                                                                   |
-| `MIRAGE_UPSTREAM_MAX_INFLIGHT`          | No       | `1`                    | Max concurrent Xtream API JSON requests (minimum 1)                                                                                                                                                                             |
-| `MIRAGE_STREAM_MAX_INFLIGHT`            | No       | `16`                   | Max concurrent upstream **`GET`** probes (`Range: bytes=0-0`) used for the default **`HEAD`** path on cache miss; additional probes **wait** for a slot (minimum 1). Video **`GET`** is redirected and does not use this limit. |
-| `MIRAGE_STREAM_PROBE_USE_UPSTREAM_HEAD` | No       | `off`                  | When `1`/`true`/`yes`/`on`, **`HEAD`** to Mirage is answered with **`307`** to the provider (client **`HEAD`**s upstream) instead of a ranged **`GET`** probe                                                                   |
+| Variable                                | Required | Default                   | Description                                                                                                                                                                                                                     |
+| --------------------------------------- | -------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `XTREAM_BASE_URL`                       | **Yes**  | —                         | Xtream server base URL (scheme + host, optional port). Trailing slashes are stripped; do **not** include `/player_api.php`. Example: `https://iptv.example.com`                                                                 |
+| `XTREAM_USERNAME`                       | **Yes**  | —                         | Xtream username for `player_api.php` and stream URLs                                                                                                                                                                            |
+| `XTREAM_PASSWORD`                       | **Yes**  | —                         | Xtream password                                                                                                                                                                                                                 |
+| `LISTEN`                                | No       | `127.0.0.1:8080`          | Socket to bind. Use `0.0.0.0:8080` only if you intend to expose Mirage on the network                                                                                                                                           |
+| `MIRAGE_TV_CATALOG_PATH`                | No       | `data/tv_catalog.rkyv`    | Filesystem path for the on-disk TV catalog snapshot                                                                                                                                                                             |
+| `MIRAGE_TV_REFRESH_SECS`                | No       | `43200`                   | How often the background job rebuilds the TV catalog (12 hours, minimum 1)                                                                                                                                                      |
+| `MIRAGE_MOVIE_CATALOG_PATH`             | No       | `data/movie_catalog.rkyv` | Filesystem path for the on-disk Movie catalog snapshot                                                                                                                                                                          |
+| `MIRAGE_MOVIE_REFRESH_SECS`             | No       | `43200`                   | How often the background job rebuilds the Movie catalog (12 hours, minimum 1)                                                                                                                                                   |
+| `MIRAGE_UPSTREAM_MIN_INTERVAL_MS`       | No       | `300`                     | Minimum spacing between **Xtream API** JSON requests process-wide (minimum 1)                                                                                                                                                   |
+| `MIRAGE_UPSTREAM_MAX_INFLIGHT`          | No       | `1`                       | Max concurrent Xtream API JSON requests (minimum 1)                                                                                                                                                                             |
+| `MIRAGE_STREAM_MAX_INFLIGHT`            | No       | `16`                      | Max concurrent upstream **`GET`** probes (`Range: bytes=0-0`) used for the default **`HEAD`** path on cache miss; additional probes **wait** for a slot (minimum 1). Video **`GET`** is redirected and does not use this limit. |
+| `MIRAGE_STREAM_PROBE_USE_UPSTREAM_HEAD` | No       | `off`                     | When `1`/`true`/`yes`/`on`, **`HEAD`** to Mirage is answered with **`307`** to the provider (client **`HEAD`**s upstream) instead of a ranged **`GET`** probe                                                                   |
 
 ### Test mode
 
@@ -60,15 +62,14 @@ cargo run --release
    ```bash
    rclone lsd mirage:
    rclone lsd mirage:movies
+   rclone lsd mirage:tv
    ```
-
-   TV libraries follow common **Plex / Jellyfin** layout under `tv/`: `/tv/` lists all shows; each show is `Show Name (year) … {seriesid-…}/Season 01/…` with episode filenames containing `S##E##` and `{epid-…}` before the extension. Until the first catalog snapshot is ready, `/tv/` returns **503** so scanners do not see an empty list as “everything deleted.”
 
 ## Mount with rclone
 
 [`rclone mount`](https://rclone.org/commands/rclone_mount/) builds a FUSE (or Windows equivalent) filesystem on top of the remote.
 
-Example **Linux** mount (replace `mirage:` with your remote name, and `/mnt/mirage` with your mountpoint):
+Example Linux mount (replace `mirage:` with your remote name, and `/mnt/mirage` with your mountpoint):
 
 ```bash
 rclone mount mirage: /mnt/mirage \
@@ -102,3 +103,56 @@ Unmount (Linux FUSE):
 ```bash
 fusermount -u /mnt/mirage
 ```
+
+## Catalog Layout & Media Server Compatibility
+
+Mirage presents a virtual file system that organizes your provider's media into a clean, predictable structure designed to be easily read by media servers like **Plex** and **Jellyfin**.
+
+To do this, Mirage embeds unique identifiers straight into the folder and file names. Media servers use these tags (like `{tmdb-12345}`) to skip fallback text-matching and instantly fetch the correct metadata.
+
+### Movie Layout
+
+Movies are organized by category, then by a folder containing the movie file itself:
+
+```text
+movies/
+  <Category Name>/
+    <Title> (<Year>) {tmdb-<id>} [tmdbid-<id>] {vodid-<id>}/
+       <Title> (<Year>) {tmdb-<id>} [tmdbid-<id>] {vodid-<id>}.<ext>
+```
+
+_Example:_ `movies/Action/The Matrix (1999) {tmdb-603} [tmdbid-603] {vodid-10042}/The Matrix (1999) {tmdb-603} [tmdbid-603] {vodid-10042}.mp4`
+
+### TV Show Layout
+
+TV Shows omit the category to avoid duplication and are structured into season folders:
+
+```text
+tv/
+  <Show Title> (<Year>) {tmdb-<id>} [tmdbid-<id>] {seriesid-<id>}/
+    Season <XX>/
+      <Episode Title> {epid-<id>}.<ext>
+```
+
+_Example:_ `tv/The Office (2005) {tmdb-2316} [tmdbid-2316] {seriesid-824}/Season 01/The Office (2005) - S01E01 - Pilot {epid-98102}.mkv`
+
+### Provider Metadata Requirements
+
+To get the best experience with full metadata matching, your IPTV provider's Xtream API should accurately populate the standard application fields. Mirage relies heavily on the following fields:
+
+**For Movies:**
+
+- `name` / `title`: Used for the base name.
+- `year`, `releaseDate`, or year in the title: Appended as `(YYYY)` to help with matching.
+- `tmdb_id` / `tmdbId`: Injected as `{tmdb-id}` and `[tmdbid-id]` which guarantees a perfect match in Plex/Jellyfin.
+- `container_extension`: Dictates the file extension (`.mp4`, `.mkv`, etc.).
+- `stream_id`: Required to generate the playable link.
+
+**For TV Shows:**
+
+- `name`: Used for the show folder name.
+- `releaseDate`: Used for the show year.
+- `tmdb`: Used for show-level matching.
+- `series_id`: Required to organize the show and fetch episode info.
+- `season` & `episode_num`: Required to organize episodes into `Season XX` folders and for metadata ordering.
+- `id` (Episode Stream ID): Required to generate the playable link.

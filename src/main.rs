@@ -1,4 +1,5 @@
 mod cache;
+mod catalog;
 mod config;
 mod error;
 mod handlers;
@@ -8,7 +9,6 @@ mod naming;
 mod pace;
 mod path_seg;
 mod state;
-mod tv_catalog;
 mod xtream;
 
 use std::net::SocketAddr;
@@ -25,11 +25,13 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::cache::AppCache;
+use crate::catalog::{
+    MovieCatalogHandle, TvCatalogHandle, movie_catalog_worker_loop, tv_catalog_worker_loop,
+};
 use crate::config::Config;
 use crate::head_metadata::HeadMetadataCache;
 use crate::pace::UpstreamPacer;
 use crate::state::AppState;
-use crate::tv_catalog::{TvCatalogHandle, tv_catalog_worker_loop};
 use crate::xtream::XtreamClient;
 
 fn init_tracing() {
@@ -79,8 +81,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let tv_catalog = TvCatalogHandle::new();
-    if let Ok(loaded) = crate::tv_catalog::load_catalog_from_path(&config.tv_catalog.catalog_path) {
-        if crate::tv_catalog::catalog_format_ok(&loaded) {
+    if let Ok(loaded) = crate::catalog::load_tv_catalog_from_path(&config.tv_catalog.catalog_path) {
+        if crate::catalog::tv_catalog_format_ok(&loaded) {
             tv_catalog.set(Some(loaded)).await;
             tracing::info!(
                 path = %config.tv_catalog.catalog_path.display(),
@@ -90,6 +92,24 @@ async fn main() -> anyhow::Result<()> {
             tracing::warn!(
                 path = %config.tv_catalog.catalog_path.display(),
                 "TV catalog file has wrong format_version; ignoring"
+            );
+        }
+    }
+
+    let movie_catalog = MovieCatalogHandle::new();
+    if let Ok(loaded) =
+        crate::catalog::load_movie_catalog_from_path(&config.movie_catalog.catalog_path)
+    {
+        if crate::catalog::movie_catalog_format_ok(&loaded) {
+            movie_catalog.set(Some(loaded)).await;
+            tracing::info!(
+                path = %config.movie_catalog.catalog_path.display(),
+                "loaded Movie catalog snapshot from disk"
+            );
+        } else {
+            tracing::warn!(
+                path = %config.movie_catalog.catalog_path.display(),
+                "Movie catalog file has wrong format_version; ignoring"
             );
         }
     }
@@ -105,13 +125,23 @@ async fn main() -> anyhow::Result<()> {
         limits: config.limits,
         head_cache: head_cache.clone(),
         tv_catalog: tv_catalog.clone(),
+        movie_catalog: movie_catalog.clone(),
         stream_probe_use_upstream_head: config.stream.probe_use_upstream_head,
         stream_inflight: stream_inflight.clone(),
     };
     let catalog_path = config.tv_catalog.catalog_path.clone();
     let refresh = config.tv_catalog.refresh;
+    let movie_path = config.movie_catalog.catalog_path.clone();
+    let movie_refresh = config.movie_catalog.refresh;
+
+    let worker_state_tv = worker_state.clone();
     tokio::spawn(async move {
-        tv_catalog_worker_loop(worker_state, catalog_path, refresh).await;
+        tv_catalog_worker_loop(worker_state_tv, catalog_path, refresh).await;
+    });
+
+    let worker_state_movie = worker_state.clone();
+    tokio::spawn(async move {
+        movie_catalog_worker_loop(worker_state_movie, movie_path, movie_refresh).await;
     });
 
     let state = AppState {
@@ -121,6 +151,7 @@ async fn main() -> anyhow::Result<()> {
         limits: config.limits,
         head_cache,
         tv_catalog,
+        movie_catalog,
         stream_probe_use_upstream_head: config.stream.probe_use_upstream_head,
         stream_inflight,
     };
@@ -139,7 +170,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .route(
             "/movies/{category_id}/{movie_dir}/{file}",
-            get(handlers::proxy_video).head(handlers::proxy_video),
+            get(handlers::proxy_video_get).head(handlers::proxy_video_head),
         )
         .route("/tv", get(handlers::redirect_tv))
         .route("/tv/", get(handlers::list_all_tv_series))
@@ -150,7 +181,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .route(
             "/tv/{show_dir}/{season_dir}/{file}",
-            get(handlers::proxy_episode).head(handlers::proxy_episode),
+            get(handlers::proxy_episode_get).head(handlers::proxy_episode_head),
         )
         .with_state(state)
         .layer(TraceLayer::new_for_http());

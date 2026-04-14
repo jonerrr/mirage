@@ -4,9 +4,9 @@ use reqwest::Client;
 use tokio::sync::Semaphore;
 
 use crate::cache::AppCache;
+use crate::catalog::{MovieCatalogHandle, TvCatalogHandle};
 use crate::config::MirageLimits;
 use crate::head_metadata::HeadMetadataCache;
-use crate::tv_catalog::TvCatalogHandle;
 use crate::xtream::XtreamClient;
 
 #[derive(Clone)]
@@ -17,6 +17,7 @@ pub struct AppState {
     pub limits: MirageLimits,
     pub head_cache: HeadMetadataCache,
     pub tv_catalog: TvCatalogHandle,
+    pub movie_catalog: MovieCatalogHandle,
     pub stream_probe_use_upstream_head: bool,
     pub stream_inflight: Arc<Semaphore>,
 }

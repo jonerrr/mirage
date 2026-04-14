@@ -208,10 +208,6 @@ pub fn video_extension(listing: &VodStream) -> String {
         .unwrap_or_else(|| "mp4".to_string())
 }
 
-pub fn video_filename(listing: &VodStream) -> String {
-    format!("{}.{}", movie_base_name(listing), video_extension(listing))
-}
-
 /// Year for a series from `name` / optional release date fields.
 pub fn display_year_series(name: &str, release_date: Option<&str>) -> String {
     if let Some(rd) = release_date.map(str::trim).filter(|s| !s.is_empty())
@@ -387,15 +383,6 @@ pub fn episode_filename(ep: &SeriesEpisode) -> Option<String> {
 /// Extract `{epid-123}` from a basename or filename stem.
 pub fn parse_epid(name: &str) -> Option<i64> {
     const KEY: &str = "{epid-";
-    let start = name.find(KEY)? + KEY.len();
-    let rest = &name[start..];
-    let end = rest.find('}')?;
-    rest[..end].parse().ok()
-}
-
-/// Extract `{vodid-123}` from a basename or filename stem.
-pub fn parse_vodid(name: &str) -> Option<i64> {
-    const KEY: &str = "{vodid-";
     let start = name.find(KEY)? + KEY.len();
     let rest = &name[start..];
     let end = rest.find('}')?;
