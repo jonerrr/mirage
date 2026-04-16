@@ -346,13 +346,11 @@ async fn handle_head_request(state: &AppState, upstream_url: String) -> Result<R
         return Ok(head_response_from_meta(&meta));
     }
 
-    let _permit = state
-        .stream_inflight
-        .acquire()
-        .await
-        .map_err(|_| AppError::internal("stream concurrency limiter closed"))?;
-
-    let meta = resolve_stream_head_metadata(&state.http, &upstream_url)
+    let http = state.http.clone();
+    let upstream_url_clone = upstream_url.clone();
+    let meta = state
+        .pacer
+        .throttle(|| async move { resolve_stream_head_metadata(&http, &upstream_url_clone).await })
         .await
         .map_err(AppError::bad_gateway)?;
 

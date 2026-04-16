@@ -23,7 +23,6 @@ pub struct UpstreamPaceConfig {
 #[derive(Debug, Clone, Copy)]
 pub struct StreamConfig {
     pub probe_use_upstream_head: bool,
-    pub max_inflight: u32,
 }
 
 /// Caps applied after each Xtream API response (truncation only; the HTTP body is still fetched once).
@@ -104,7 +103,7 @@ impl Config {
             refresh: Duration::from_secs(movie_refresh_secs),
         };
 
-        let min_interval_ms = env_positive("MIRAGE_UPSTREAM_MIN_INTERVAL_MS", 300);
+        let min_interval_ms = env_positive("MIRAGE_UPSTREAM_MIN_INTERVAL_MS", 1000);
         let max_inflight = env_positive("MIRAGE_UPSTREAM_MAX_INFLIGHT", 1);
         let upstream_pace = UpstreamPaceConfig {
             min_interval: Duration::from_millis(min_interval_ms),
@@ -113,7 +112,6 @@ impl Config {
 
         let stream = StreamConfig {
             probe_use_upstream_head: env_truthy("MIRAGE_STREAM_PROBE_USE_UPSTREAM_HEAD"),
-            max_inflight: env_positive("MIRAGE_STREAM_MAX_INFLIGHT", 16),
         };
 
         Ok(Self {

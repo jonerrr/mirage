@@ -12,13 +12,11 @@ mod state;
 mod xtream;
 
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 use axum::Router;
 use axum::routing::get;
 use tokio::net::TcpListener;
 use tokio::signal;
-use tokio::sync::Semaphore;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -64,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
 
     let xtream = XtreamClient::new(
         http.clone(),
-        pacer,
+        pacer.clone(),
         config.xtream_base_url.clone(),
         config.xtream_username.clone(),
         config.xtream_password.clone(),
@@ -116,10 +114,10 @@ async fn main() -> anyhow::Result<()> {
 
     let cache = AppCache::new();
     let head_cache = HeadMetadataCache::new();
-    let stream_inflight = Arc::new(Semaphore::new(config.stream.max_inflight as usize));
 
     let worker_state = AppState {
         xtream: xtream.clone(),
+        pacer: pacer.clone(),
         http: http.clone(),
         cache: cache.clone(),
         limits: config.limits,
@@ -127,7 +125,6 @@ async fn main() -> anyhow::Result<()> {
         tv_catalog: tv_catalog.clone(),
         movie_catalog: movie_catalog.clone(),
         stream_probe_use_upstream_head: config.stream.probe_use_upstream_head,
-        stream_inflight: stream_inflight.clone(),
     };
     let catalog_path = config.tv_catalog.catalog_path.clone();
     let refresh = config.tv_catalog.refresh;
@@ -146,6 +143,7 @@ async fn main() -> anyhow::Result<()> {
 
     let state = AppState {
         xtream,
+        pacer,
         http,
         cache,
         limits: config.limits,
@@ -153,7 +151,6 @@ async fn main() -> anyhow::Result<()> {
         tv_catalog,
         movie_catalog,
         stream_probe_use_upstream_head: config.stream.probe_use_upstream_head,
-        stream_inflight,
     };
 
     let app = Router::new()

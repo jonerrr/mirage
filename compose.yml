@@ -1,53 +1,76 @@
 # used to test mirage with plex and jellyfin, not intended for production use
 services:
-  mirage:
-    build: .
-    container_name: mirage
+  # mirage:
+  #   build: .
+  #   container_name: mirage
+  #   # restart: unless-stopped
+  #   environment:
+  #     - LISTEN=0.0.0.0:8080
+  #     - MIRAGE_TV_CATALOG_PATH=/data/tv_catalog.rkyv
+  #   env_file:
+  #     - .env.docker
+  #   volumes:
+  #     - mirage-data:/data
+  #   ports:
+  #     - 8080:8080/tcp
+
+  # plex:
+  #   image: lscr.io/linuxserver/plex:latest
+  #   container_name: plex
+  #   #   restart: unless-stopped
+  #   environment:
+  #     # - PUID=${PUID:-1000}
+  #     # - PGID=${PGID:-1000}
+  #     - PUID=0
+  #     - PGID=0
+  #     - TZ=${TZ:-Etc/UTC}
+  #     - VERSION=docker
+  #   volumes:
+  #     - plex-config:/config
+  #     - /mnt/mirage:/media:ro,z
+  #   ports:
+  #     - 32400:32400/tcp
+
+  # jellyfin:
+  #   image: lscr.io/linuxserver/jellyfin:latest
+  #   container_name: jellyfin
+  #   # restart: unless-stopped
+  #   # added this bc selinux was preventing access to media mount
+  #   security_opt:
+  #     - label=disable
+  #   environment:
+  #     # - PUID=${PUID:-1000}
+  #     # - PGID=${PGID:-1000}
+  #     - PUID=0
+  #     - PGID=0
+  #     - TZ=${TZ:-Etc/UTC}
+  #   volumes:
+  #     - jellyfin-config:/config
+  #     - /mnt/mirage:/media:ro
+  #   ports:
+  #     - 8096:8096/tcp
+
+  emby:
+    image: lscr.io/linuxserver/emby:latest
+    container_name: emby
     # restart: unless-stopped
+    # added this bc selinux was preventing access to media mount
+    security_opt:
+      - label=disable
     environment:
-      - LISTEN=0.0.0.0:8080
-      - MIRAGE_TV_CATALOG_PATH=/data/tv_catalog.rkyv
-    env_file:
-      - .env.docker
+      # - PUID=${PUID:-1000}
+      # - PGID=${PGID:-1000}
+      - PUID=0
+      - PGID=0
+      - TZ=${TZ:-Etc/UTC}
     volumes:
-      - mirage-data:/data
+      - emby-config:/config
+      - /mnt/mirage:/media:ro
     ports:
-      - 8080:8080/tcp
-
-# plex:
-#   image: lscr.io/linuxserver/plex:latest
-#   container_name: plex
-#   #   restart: unless-stopped
-#   environment:
-#     # - PUID=${PUID:-1000}
-#     # - PGID=${PGID:-1000}
-#     - PUID=0
-#     - PGID=0
-#     - TZ=${TZ:-Etc/UTC}
-#     - VERSION=docker
-#   volumes:
-#     - plex-config:/config
-#     - /mnt/mirage:/media:ro,z
-#   ports:
-#     - 32400:32400/tcp
-
-# jellyfin:
-#   image: lscr.io/linuxserver/jellyfin:latest
-#   container_name: jellyfin
-#   # restart: unless-stopped
-#   environment:
-#     # - PUID=${PUID:-1000}
-#     # - PGID=${PGID:-1000}
-#     - PUID=0
-#     - PGID=0
-#     - TZ=${TZ:-Etc/UTC}
-#   volumes:
-#     - jellyfin-config:/config
-#     - /mnt/mirage:/media:ro,z
-#   ports:
-#     - 8096:8096/tcp
+      - 8097:8096/tcp
 
 volumes:
   mirage-data:
   plex-config:
   jellyfin-config:
+  emby-config:
