@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/jonerrr/mirage/compare/v0.1.0...v0.2.0) (2026-04-17)
+
+
+### Features
+
+* movie catalog caching ([a6b9b40](https://github.com/jonerrr/mirage/commit/a6b9b40767415a73fb151e31d6687b3effaef8eb))
+
 ## 0.1.0 (2026-04-13)
 
 
