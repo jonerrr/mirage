@@ -80,8 +80,6 @@ rclone mount mirage: /mnt/mirage \
   --vfs-read-chunk-size 16M \
   --vfs-read-chunk-size-limit 64M \
   --buffer-size 16M \
-  --tpslimit 4 \
-  --tpslimit-burst 4 \
   --no-checksum \
   --no-modtime
 ```
@@ -89,7 +87,7 @@ rclone mount mirage: /mnt/mirage \
 ### Why these flags?
 
 - `--read-only`: Prevents writes, deletes, or renames through the mount so media scanners and players can only read files.
-- `--tpslimit 4 --tpslimit-burst 4`: Rate-limits scans and metadata bursts (for example, Plex library scans) so you are less likely to trip provider concurrency/request limits.
+<!-- - `--tpslimit 4 --tpslimit-burst 4`: Rate-limits scans and metadata bursts (for example, Plex library scans) so you are less likely to trip provider concurrency/request limits. -->
 - `--vfs-read-chunk-size 16M --vfs-read-chunk-size-limit 64M`: Starts with moderate read-ahead, grows for sequential playback, and caps growth so a single stream does not request huge chunks.
 - `--vfs-cache-mode full`: Enables disk-backed VFS reads, which is key for seeks and rewinds without re-fetching the same ranges upstream.
 - `--vfs-cache-max-size 20G --vfs-cache-max-age 2h`: Keeps a bounded rolling cache; old or unused chunks are evicted automatically.
