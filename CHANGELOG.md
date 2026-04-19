@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/jonerrr/mirage/compare/v0.1.0...v0.2.0) (2026-04-19)
+
+
+### Features
+
+* movie catalog caching ([a6b9b40](https://github.com/jonerrr/mirage/commit/a6b9b40767415a73fb151e31d6687b3effaef8eb))
+
+
+### Bug Fixes
+
+* remove unused tokio features ([4b64dd6](https://github.com/jonerrr/mirage/commit/4b64dd60379984676f884da94f6753397d5d64ec))
+
 ## 0.1.0 (2026-04-13)
 
 
