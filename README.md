@@ -98,7 +98,7 @@ rclone mount mirage: /mnt/mirage \
 Unmount (Linux FUSE):
 
 ```bash
-fusermount -u /mnt/mirage
+fusermount3 -u /mnt/mirage
 ```
 
 ## Run with systemd

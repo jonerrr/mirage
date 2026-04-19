@@ -11,14 +11,10 @@ PartOf=mirage.service
 
 [Service]
 Type=notify
-# Run the service as your local user so it can find the default ~/.config/rclone/rclone.conf
-# User=jonah
-# Group=jonah
 
-# Wait until Mirage is responding on the local HTTP endpoint.
-# ExecStartPre=/usr/bin/curl --fail --silent --show-error --max-time 2 --retry 30 --retry-connrefused --retry-delay 1 http://127.0.0.1:8080/
+# NOTE: this probably won't work since the user running this service likely doesn't have permissions to create the mount point, so you'll have to run this command manually (and give it the appropriate permissions) or change the mount point to somewhere else.
 ExecStartPre=-/usr/bin/mkdir -p /mnt/mirage
-
+# NOTE: you might want to add --allow-other to the options below, but be aware of the security implications (this also requires updating your /etc/fuse.conf).
 ExecStart=/usr/bin/rclone mount mirage: /mnt/mirage \
   --read-only \
   --dir-cache-time 24h \
@@ -32,7 +28,7 @@ ExecStart=/usr/bin/rclone mount mirage: /mnt/mirage \
   --no-modtime
 
 # Unmount properly when the service is stopped
-ExecStop=/bin/fusermount -uz /mnt/mirage
+ExecStop=/usr/bin/fusermount3 -uz /mnt/mirage
 
 Restart=on-failure
 RestartSec=10
