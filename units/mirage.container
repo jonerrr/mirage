@@ -1,0 +1,27 @@
+# Example Quadlet container for Mirage.
+#
+# Place at ~/.config/containers/systemd/mirage.container
+
+[Unit]
+Description=Mirage container via Podman Quadlet
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=mirage
+Image=ghcr.io/jonerrr/mirage:latest
+EnvironmentFile=./.env.mirage
+Environment=LISTEN=0.0.0.0:8080
+Environment=MIRAGE_TV_CATALOG_PATH=/data/tv_catalog.rkyv
+Environment=MIRAGE_MOVIE_CATALOG_PATH=/data/movie_catalog.rkyv
+Volume=mirage.volume:/data
+PublishPort=8080:8080
+HealthCmd=curl --fail --silent --show-error --max-time 2 http://127.0.0.1:8080/ || exit 1
+
+[Service]
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target

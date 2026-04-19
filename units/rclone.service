@@ -1,0 +1,42 @@
+# Example User service for Rclone mounting
+#
+# Place at ~/.config/systemd/user/rclone.service
+[Unit]
+Description=Rclone Mount for Mirage
+Documentation=man:rclone(1)
+After=network-online.target mirage.service
+Wants=network-online.target
+Requires=mirage.service
+PartOf=mirage.service
+
+[Service]
+Type=notify
+# Run the service as your local user so it can find the default ~/.config/rclone/rclone.conf
+# User=jonah
+# Group=jonah
+
+# Wait until Mirage is responding on the local HTTP endpoint.
+# ExecStartPre=/usr/bin/curl --fail --silent --show-error --max-time 2 --retry 30 --retry-connrefused --retry-delay 1 http://127.0.0.1:8080/
+ExecStartPre=-/usr/bin/mkdir -p /mnt/mirage
+
+ExecStart=/usr/bin/rclone mount mirage: /mnt/mirage \
+  --read-only \
+  --dir-cache-time 24h \
+  --vfs-cache-mode full \
+  --vfs-cache-max-size 20G \
+  --vfs-cache-max-age 2h \
+  --vfs-read-chunk-size 16M \
+  --vfs-read-chunk-size-limit 64M \
+  --buffer-size 16M \
+  --no-checksum \
+  --no-modtime
+
+# Unmount properly when the service is stopped
+ExecStop=/bin/fusermount -uz /mnt/mirage
+
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target

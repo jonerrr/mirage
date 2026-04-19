@@ -1,0 +1,4 @@
+# Example Quadlet volume for Mirage.
+#
+# Place at ~/.config/containers/systemd/mirage.volume
+[Volume]

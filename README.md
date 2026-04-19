@@ -101,6 +101,79 @@ Unmount (Linux FUSE):
 fusermount -u /mnt/mirage
 ```
 
+## Run with systemd
+
+The repository includes example unit files in `units/` for running Mirage as a rootless Podman Quadlet and mounting it with an rclone user service.
+
+### Prerequisites
+
+- Podman with Quadlet support (user services)
+- systemd user session (`systemctl --user ...`)
+- rclone configured with an `http` remote that points to `http://127.0.0.1:8080/`
+- FUSE tools available (`fusermount`)
+
+### 1. Install the unit files
+
+```bash
+mkdir -p ~/.config/containers/systemd ~/.config/systemd/user
+cp units/mirage.container ~/.config/containers/systemd/mirage.container
+cp units/mirage.volume ~/.config/containers/systemd/mirage.volume
+cp units/rclone.service ~/.config/systemd/user/rclone.service
+```
+
+### 2. Create `.env.mirage`
+
+`mirage.container` uses:
+
+```ini
+EnvironmentFile=./.env.mirage
+```
+
+That means `.env.mirage` must exist next to `mirage.container` at:
+
+```text
+~/.config/containers/systemd/.env.mirage
+```
+
+Minimum required variables in `.env.mirage`:
+
+```dotenv
+XTREAM_BASE_URL=https://iptv.example.com
+XTREAM_USERNAME=your_username
+XTREAM_PASSWORD=your_password
+```
+
+Notes:
+
+- Use plain `KEY=VALUE` lines (no `export`)
+- Keep the file readable only by your user account:
+
+  ```bash
+  chmod 600 ~/.config/containers/systemd/.env.mirage
+  ```
+
+### 3. Reload and start user units
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now rclone.service
+```
+
+`rclone.service` has `Requires=mirage.service` and `After=mirage.service`, so starting rclone will pull Mirage up first.
+
+### 4. Verify and troubleshoot
+
+```bash
+systemctl --user status mirage.service rclone.service
+journalctl --user -u mirage.service -u rclone.service -f
+```
+
+Optional: keep user services running after logout:
+
+```bash
+loginctl enable-linger "$USER"
+```
+
 ## Catalog Layout & Media Server Compatibility
 
 Mirage presents a virtual file system that organizes your provider's media into a clean, predictable structure designed to be easily read by media servers like **Plex** and **Jellyfin**.
