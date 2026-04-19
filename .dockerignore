@@ -1,6 +1,7 @@
 target/
 data/
 .github/
+units/
 *.md
 mise.*.toml
 mise.toml
