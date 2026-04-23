@@ -34,7 +34,7 @@ Mirage still performs a normal `get_vod_categories` / `get_vod_streams` HTTP cal
 
 In test mode the home page is labeled **Mirage (test mode)**, the **Movies** and **TV Shows** links both use the limited-catalog labels, and startup logs a short warning with the active caps.
 
-**Logging:** If `RUST_LOG` is unset, Mirage defaults to `mirage=debug,tower_http=debug,axum=trace`. Override with `RUST_LOG` when you want quieter logs.
+**Logging:** If `RUST_LOG` is unset, Mirage defaults to `mirage=info`.
 
 ## Run Mirage
 

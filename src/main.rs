@@ -12,12 +12,15 @@ mod state;
 mod xtream;
 
 use std::net::SocketAddr;
+use std::time::Instant;
 
 use axum::Router;
+use axum::http::Request;
+use axum::middleware::{self, Next};
+use axum::response::Response;
 use axum::routing::get;
 use tokio::net::TcpListener;
 use tokio::signal;
-use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -33,10 +36,7 @@ use crate::state::AppState;
 use crate::xtream::XtreamClient;
 
 fn init_tracing() {
-    let default_filter = format!(
-        "{}=debug,tower_http=debug,axum=trace",
-        env!("CARGO_CRATE_NAME")
-    );
+    let default_filter = format!("{}=info", env!("CARGO_CRATE_NAME"));
     let env_filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter));
 
@@ -181,7 +181,7 @@ async fn main() -> anyhow::Result<()> {
             get(handlers::proxy_episode_get).head(handlers::proxy_episode_head),
         )
         .with_state(state)
-        .layer(TraceLayer::new_for_http());
+        .layer(middleware::from_fn(log_request));
 
     let addr: SocketAddr = config.listen.parse()?;
     let listener = TcpListener::bind(addr).await?;
@@ -219,4 +219,22 @@ async fn shutdown_signal() {
     }
 
     tracing::info!("shutdown signal received");
+}
+
+async fn log_request(req: Request<axum::body::Body>, next: Next) -> Response {
+    let started_at = Instant::now();
+    let method = req.method().clone();
+    let uri = req.uri().clone();
+
+    let response = next.run(req).await;
+    let status = response.status();
+    tracing::info!(
+        %method,
+        uri = %uri.path(),
+        status = status.as_u16(),
+        latency_ms = started_at.elapsed().as_millis(),
+        "request completed"
+    );
+
+    response
 }
