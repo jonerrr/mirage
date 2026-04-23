@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/jonerrr/mirage/compare/v0.2.0...v0.2.1) (2026-04-23)
+
+
+### Bug Fixes
+
+* add units to dockerignore ([5c70a73](https://github.com/jonerrr/mirage/commit/5c70a7329c827f7fbca2af6090d601a6cff5d2ca))
+* simplify tracing ([cb8adb0](https://github.com/jonerrr/mirage/commit/cb8adb0f4a6dee9bf696e23bd17840b21df5dc78))
+
 ## [0.2.0](https://github.com/jonerrr/mirage/compare/v0.1.0...v0.2.0) (2026-04-19)
 
 
