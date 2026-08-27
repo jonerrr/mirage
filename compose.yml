@@ -1,7 +1,7 @@
 # used to test mirage with plex and jellyfin, not intended for production use
 services:
   mirage:
-    image: ghcr.io/jonerrr/mirage:latest
+    image: ghcr.io/jonerrr/mirage:latest@sha256:6eaa83a69ac0659faf3346d0dd72953e4bbf67c9ad2e0a67e44c3f76b05c2521
     # build: .
     container_name: mirage
     environment:
