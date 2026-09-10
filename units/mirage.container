@@ -9,7 +9,7 @@ Wants=network-online.target
 
 [Container]
 ContainerName=mirage
-Image=ghcr.io/jonerrr/mirage:latest
+Image=ghcr.io/jonerrr/mirage:latest@sha256:6eaa83a69ac0659faf3346d0dd72953e4bbf67c9ad2e0a67e44c3f76b05c2521
 EnvironmentFile=./.env.mirage
 Environment=LISTEN=0.0.0.0:8080
 Environment=MIRAGE_TV_CATALOG_PATH=/data/tv_catalog.rkyv
