@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/jonerrr/mirage/compare/v0.2.1...v0.2.2) (2026-11-07)
+
+
+### Bug Fixes
+
+* **deps:** update cargo dependencies ([#18](https://github.com/jonerrr/mirage/issues/18)) ([20774b2](https://github.com/jonerrr/mirage/commit/20774b27f6a75e5a8747d9868658e405021edd0c))
+
 ## [0.2.1](https://github.com/jonerrr/mirage/compare/v0.2.0...v0.2.1) (2026-04-23)
 
 
